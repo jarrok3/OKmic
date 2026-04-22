@@ -11,10 +11,10 @@ The current layout and design of the app is in-progress, however the general fou
 
 ![Fig. 1.](figures/1.png)
 
-![Fig. 2.](figures/1.png)
+![Fig. 2.](figures/2.png)
 
-![Fig. 3.](figures/1.png)
+![Fig. 3.](figures/3.png)
 
-![Fig. 4.](figures/1.png)
+![Fig. 4.](figures/4.png)
 
-![Fig. 5.](figures/1.png)
+![Fig. 5.](figures/5.png)
