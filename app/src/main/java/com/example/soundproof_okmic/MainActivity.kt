@@ -1,29 +1,48 @@
 package com.example.soundproof_okmic
 
 import android.os.Bundle
-import androidx.lifecycle.ViewModel
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.ui.tooling.preview.Preview
-import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.rounded.FiberSmartRecord
+import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
+
+data object InScreenOffset{
+    val x = (-12).dp
+    val y = (-12).dp
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,52 +59,125 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainLayout(modifier: Modifier = Modifier)
 {
+    Scaffold(
+        modifier = modifier,
+        topBar = { TopNavBar(Modifier.fillMaxWidth()) },
+        bottomBar = { BottomNavBar(Modifier.fillMaxWidth()) },
+        floatingActionButton = { FloatingRecordButton() }
+    ) { innerPadding ->
+        Column(modifier = Modifier.padding(innerPadding)) {
+            Text("Loudest: ")
+            Text("Lowest: ")
+        }
+    }
+}
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TopNavBar(modifier: Modifier = Modifier)
+{
+    CenterAlignedTopAppBar(
+        actions = {
+            DropDownMenu(modifier = Modifier.padding(14.dp))
+        },
+        title = { Text("Audio capture") },
+        modifier = modifier,
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            titleContentColor = MaterialTheme.colorScheme.onPrimary,
+            actionIconContentColor = MaterialTheme.colorScheme.onSecondary
+        )
+    )
+}
+
+
+@Composable
+fun DropDownMenu(modifier: Modifier = Modifier)
+{
+    var expanded by remember {mutableStateOf(false)}
+
+    Box(
+        modifier = modifier
+    )
+    {
+        IconButton(onClick = { expanded = !expanded }) {
+            Icon(
+                imageVector = Icons.Filled.Menu,
+                contentDescription = "Nav"
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ){
+            DropdownMenuItem(
+                modifier = Modifier.fillMaxWidth(),
+                text = { Text("My Captures") },
+                onClick = { }
+            )
+        }
+    }
 }
 
 @Composable
-fun TopNavBar()
+fun BottomNavBar(modifier: Modifier = Modifier)
 {
-
-}
-
-@Composable
-fun BottomNavBar()
-{
-
+    NavigationBar(modifier = modifier) {
+        NavigationBarItem(
+            selected = true,
+            onClick = { },
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.LocationOn,
+                    contentDescription = "Heatmap"
+                )
+            },
+            label = {  }
+        )
+        NavigationBarItem(
+            selected = true,
+            onClick = { },
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.Mic,
+                    contentDescription = "Heatmap"
+                )
+            },
+            label = {  }
+        )
+    }
 }
 
 @Composable
 fun FloatingRecordButton()
 {
-    var expanded = remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
 
-    Column {
-        Text("Some text")
-        if (expanded.value) {
-            Text("More details")
-        }
+    Button(
+        elevation = ButtonDefaults.elevatedButtonElevation(
+            defaultElevation = 8.dp
+        ),
+        shape = ButtonDefaults.shape,
+        onClick = { recording = !recording },
+        modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.FiberSmartRecord,
+            contentDescription = "Record_audio"
+        )
+    }
 
-        Button(
-            // The expand details event is processed by the UI that
-            // modifies this composable's internal state.
-            onClick = { expanded.value = !expanded.value }
-        ) {
-            val expandText = if (expanded.value) "Collapse" else "Expand"
-            Text("$expandText details")
-        }
-
-        // The refresh event is processed by the ViewModel that is in charge
-        // of the UI's business logic.
+    // The refresh event is processed by the ViewModel that is in charge
+    // of the UI's business logic.
 //        Button(onClick = { viewModel.refreshNews() }) {
 //            Text("Refresh data")
 //        }
-    }
+
 }
 
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
+fun MainScreen() {
     SoundProof_OKmicTheme {
         MainLayout()
     }
