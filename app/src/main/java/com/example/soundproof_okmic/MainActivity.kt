@@ -1,15 +1,20 @@
 package com.example.soundproof_okmic
 
 import android.os.Bundle
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.FiberSmartRecord
@@ -24,9 +29,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.MenuItemColors
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -35,6 +43,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
@@ -65,9 +77,16 @@ fun MainLayout(modifier: Modifier = Modifier)
         bottomBar = { BottomNavBar(Modifier.fillMaxWidth()) },
         floatingActionButton = { FloatingRecordButton() }
     ) { innerPadding ->
-        Column(modifier = Modifier.padding(innerPadding)) {
-            Text("Loudest: ")
-            Text("Lowest: ")
+        Column {
+            Column(
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .offset(-InScreenOffset.x, -InScreenOffset.y)
+            ) {
+                Text("Loudest: ")
+                Text("Lowest: ")
+            }
+            AudioCanvas()
         }
     }
 }
@@ -113,7 +132,8 @@ fun DropDownMenu(modifier: Modifier = Modifier)
             DropdownMenuItem(
                 modifier = Modifier.fillMaxWidth(),
                 text = { Text("My Captures") },
-                onClick = { }
+                onClick = { },
+                colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary)
             )
         }
     }
@@ -151,14 +171,14 @@ fun BottomNavBar(modifier: Modifier = Modifier)
 @Composable
 fun FloatingRecordButton()
 {
-    var recording by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
 
     Button(
         elevation = ButtonDefaults.elevatedButtonElevation(
             defaultElevation = 8.dp
         ),
         shape = ButtonDefaults.shape,
-        onClick = { recording = !recording },
+        onClick = { isRecording = !isRecording },
         modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
     ) {
         Icon(
@@ -173,6 +193,28 @@ fun FloatingRecordButton()
 //            Text("Refresh data")
 //        }
 
+}
+
+@Composable
+fun AudioCanvas()
+{
+    Canvas(
+        modifier = Modifier
+            .padding(0.dp)
+            .fillMaxWidth()
+            .height(400.dp)
+            .background(
+                color = MaterialTheme.colorScheme.background
+            )
+    )
+    {
+        drawLine(
+            color = Color.Blue,
+            start = Offset(0f, 0f),
+            end = Offset(size.width, size.height),
+            strokeWidth = 10f
+        )
+    }
 }
 
 @Preview(showBackground = true)
