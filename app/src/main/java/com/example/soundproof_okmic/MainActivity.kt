@@ -63,6 +63,14 @@ data object InScreenOffset{
 }
 
 class MainActivity : ComponentActivity() {
+    // External OBOE lib inclusion
+    companion object {
+        init {
+            System.loadLibrary("native-audio-lib")
+        }
+    }
+
+    // Main
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
