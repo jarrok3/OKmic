@@ -196,24 +196,27 @@ fun FloatingRecordButton()
 }
 
 @Composable
-fun AudioCanvas()
+fun AudioCanvas(isRecording: Boolean = false)
 {
-    Canvas(
-        modifier = Modifier
-            .padding(0.dp)
-            .fillMaxWidth()
-            .height(400.dp)
-            .background(
-                color = MaterialTheme.colorScheme.background
-            )
-    )
+    if(isRecording)
     {
-        drawLine(
-            color = Color.Blue,
-            start = Offset(0f, 0f),
-            end = Offset(size.width, size.height),
-            strokeWidth = 10f
+        Canvas(
+            modifier = Modifier
+                .padding(0.dp)
+                .fillMaxWidth()
+                .height(400.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.background
+                )
         )
+        {
+            drawLine(
+                color = Color.Blue,
+                start = Offset(0f, 0f),
+                end = Offset(size.width, size.height),
+                strokeWidth = 10f
+            )
+        }
     }
 }
 
