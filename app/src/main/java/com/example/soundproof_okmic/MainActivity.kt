@@ -1,20 +1,21 @@
 package com.example.soundproof_okmic
 
 import android.os.Bundle
-import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.FiberSmartRecord
@@ -23,33 +24,38 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
-import androidx.compose.material3.MenuItemColors
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Shapes
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
+import kotlinx.serialization.Serializable
 
 data object InScreenOffset{
     val x = (-12).dp
@@ -57,47 +63,89 @@ data object InScreenOffset{
 }
 
 class MainActivity : ComponentActivity() {
+    // External OBOE lib inclusion
+    companion object {
+        init {
+            System.loadLibrary("native-audio-lib")
+        }
+    }
+
+    // Main
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             SoundProof_OKmicTheme {
-                MainLayout(Modifier.fillMaxSize())
+                val navController = rememberNavController()
+                NavHost(
+                    navController = navController,
+                    startDestination = AudioScreen
+                )
+                {
+                    composable<AudioScreen>{
+                        MainLayout(navController = navController, modifier = Modifier.fillMaxSize())
+                    }
+                    composable<MyCapturesScreen>{
+                        MyCapturesLayout(navController)
+                    }
+                }
             }
         }
     }
 }
 
+// === MAIN LAYOUT ===
 @Composable
-fun MainLayout(modifier: Modifier = Modifier)
+fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
 {
+    var isRecording by remember { mutableStateOf(false) }
+    var loudestDb by remember { mutableFloatStateOf(0.0f) }
+    var lowestDb by remember { mutableFloatStateOf(0.0f) }
+
     Scaffold(
         modifier = modifier,
-        topBar = { TopNavBar(Modifier.fillMaxWidth()) },
-        bottomBar = { BottomNavBar(Modifier.fillMaxWidth()) },
-        floatingActionButton = { FloatingRecordButton() }
+        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
+        floatingActionButton = { FloatingRecordButton(isRecording = isRecording, onRecordingChange = { isRecording = it }) }
     ) { innerPadding ->
-        Column {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentAlignment = Alignment.TopStart
+        ) {
+            val horizontalMargin = maxWidth * 0.05f
+
             Column(
                 modifier = Modifier
-                    .padding(innerPadding)
-                    .offset(-InScreenOffset.x, -InScreenOffset.y)
+                    .fillMaxWidth()
+                    .padding(horizontal = horizontalMargin), // Nakładanie obliczonego marginesu
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.Start
             ) {
-                Text("Loudest: ")
-                Text("Lowest: ")
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Loudest: $loudestDb [dB]")
+                Text("Lowest: $lowestDb [dB]")
+                HorizontalDivider(
+                    modifier = Modifier
+                        .padding(vertical = 8.dp)
+                        .fillMaxWidth(),
+                    thickness = DividerDefaults.Thickness,
+                    color = DividerDefaults.color
+                )
             }
-            AudioCanvas()
+            AudioCanvas(isRecording = isRecording)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TopNavBar(modifier: Modifier = Modifier)
+fun TopNavBar(navController: NavController, modifier: Modifier = Modifier)
 {
     CenterAlignedTopAppBar(
         actions = {
-            DropDownMenu(modifier = Modifier.padding(14.dp))
+            DropDownMenu(navController, modifier = Modifier.padding(14.dp))
         },
         title = { Text("Audio capture") },
         modifier = modifier,
@@ -111,7 +159,7 @@ fun TopNavBar(modifier: Modifier = Modifier)
 
 
 @Composable
-fun DropDownMenu(modifier: Modifier = Modifier)
+fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
 {
     var expanded by remember {mutableStateOf(false)}
 
@@ -132,7 +180,10 @@ fun DropDownMenu(modifier: Modifier = Modifier)
             DropdownMenuItem(
                 modifier = Modifier.fillMaxWidth(),
                 text = { Text("My Captures") },
-                onClick = { },
+                onClick = {
+                    expanded = false
+                    navController.navigate(MyCapturesScreen)
+                },
                 colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary)
             )
         }
@@ -140,11 +191,11 @@ fun DropDownMenu(modifier: Modifier = Modifier)
 }
 
 @Composable
-fun BottomNavBar(modifier: Modifier = Modifier)
+fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
 {
     NavigationBar(modifier = modifier) {
         NavigationBarItem(
-            selected = true,
+            selected = false,
             onClick = { },
             icon = {
                 Icon(
@@ -156,11 +207,16 @@ fun BottomNavBar(modifier: Modifier = Modifier)
         )
         NavigationBarItem(
             selected = true,
-            onClick = { },
+            onClick = {
+                navController.navigate(AudioScreen) {
+                    popUpTo(navController.graph.startDestinationId)
+                    launchSingleTop = true
+                }
+            },
             icon = {
                 Icon(
                     imageVector = Icons.Rounded.Mic,
-                    contentDescription = "Heatmap"
+                    contentDescription = "Audio"
                 )
             },
             label = {  }
@@ -169,18 +225,20 @@ fun BottomNavBar(modifier: Modifier = Modifier)
 }
 
 @Composable
-fun FloatingRecordButton()
+fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> Unit)
 {
-    var isRecording by remember { mutableStateOf(false) }
 
     Button(
         elevation = ButtonDefaults.elevatedButtonElevation(
             defaultElevation = 8.dp
         ),
         shape = ButtonDefaults.shape,
-        onClick = { isRecording = !isRecording },
+        onClick = { onRecordingChange(!isRecording) },
         modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
     ) {
+        Text(
+            text = "REC "
+        )
         Icon(
             imageVector = Icons.Rounded.FiberSmartRecord,
             contentDescription = "Record_audio"
@@ -196,7 +254,7 @@ fun FloatingRecordButton()
 }
 
 @Composable
-fun AudioCanvas(isRecording: Boolean = false)
+fun AudioCanvas(isRecording: Boolean)
 {
     if(isRecording)
     {
@@ -220,10 +278,38 @@ fun AudioCanvas(isRecording: Boolean = false)
     }
 }
 
+
+// === MY CAPTURES LAYOUT ===
+@Composable
+fun MyCapturesLayout(navController: NavController) {
+    Scaffold(
+        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            Text(
+                text = "Dzień Dobry Polsko witam serdecznie!"
+            )
+        }
+    }
+}
+
+// Screen navigation
+@Serializable
+object AudioScreen
+
+@Serializable
+object MyCapturesScreen
+
+// Previews
 @Preview(showBackground = true)
 @Composable
 fun MainScreen() {
     SoundProof_OKmicTheme {
-        MainLayout()
+        MainLayout(navController = rememberNavController())
     }
 }
