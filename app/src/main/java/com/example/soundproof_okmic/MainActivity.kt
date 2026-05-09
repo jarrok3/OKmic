@@ -41,6 +41,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,8 +52,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
 import kotlinx.serialization.Serializable
@@ -86,7 +91,10 @@ class MainActivity : ComponentActivity() {
                         MainLayout(navController = navController, modifier = Modifier.fillMaxSize())
                     }
                     composable<MyCapturesScreen>{
-                        MyCapturesLayout(navController)
+                        MyCapturesLayout(navController, modifier = Modifier.fillMaxSize())
+                    }
+                    composable<MapsScreen>{
+                        NoiseMapLayout(navController, modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -119,7 +127,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = horizontalMargin), // Nakładanie obliczonego marginesu
+                    .padding(horizontal = horizontalMargin), // Apply margin
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.Start
             ) {
@@ -133,21 +141,31 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     thickness = DividerDefaults.Thickness,
                     color = DividerDefaults.color
                 )
+                AudioCanvas(isRecording = isRecording)
             }
-            AudioCanvas(isRecording = isRecording)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TopNavBar(navController: NavController, modifier: Modifier = Modifier)
-{
+fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
+    // Remember route
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+
+    val title = when {
+        currentDestination?.hasRoute(AudioScreen::class) == true -> "Audio capture"
+        currentDestination?.hasRoute(MyCapturesScreen::class) == true -> "My Captures"
+        currentDestination?.hasRoute(MapsScreen::class) == true -> "Noise Map"
+        else -> "SoundProof"
+    }
+
     CenterAlignedTopAppBar(
         actions = {
             DropDownMenu(navController, modifier = Modifier.padding(14.dp))
         },
-        title = { Text("Audio capture") },
+        title = { Text(title) },
         modifier = modifier,
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.primary,
@@ -182,7 +200,13 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
                 text = { Text("My Captures") },
                 onClick = {
                     expanded = false
-                    navController.navigate(MyCapturesScreen)
+                    navController.navigate(MyCapturesScreen) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 },
                 colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary)
             )
@@ -193,10 +217,22 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
 @Composable
 fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
 {
+    // Observing NavController state to determine the value for the "selected" property
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+
     NavigationBar(modifier = modifier) {
         NavigationBarItem(
-            selected = false,
-            onClick = { },
+            selected = currentDestination?.hierarchy?.any { it.hasRoute(MapsScreen::class) } == true,
+            onClick = {
+                navController.navigate(MapsScreen) {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
             icon = {
                 Icon(
                     imageVector = Icons.Rounded.LocationOn,
@@ -206,11 +242,14 @@ fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
             label = {  }
         )
         NavigationBarItem(
-            selected = true,
+            selected = currentDestination?.hierarchy?.any { it.hasRoute(AudioScreen::class) } == true,
             onClick = {
                 navController.navigate(AudioScreen) {
-                    popUpTo(navController.graph.startDestinationId)
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
                     launchSingleTop = true
+                    restoreState = true
                 }
             },
             icon = {
@@ -281,7 +320,26 @@ fun AudioCanvas(isRecording: Boolean)
 
 // === MY CAPTURES LAYOUT ===
 @Composable
-fun MyCapturesLayout(navController: NavController) {
+fun MyCapturesLayout(navController: NavController, modifier : Modifier = Modifier) {
+    Scaffold(
+        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            Text(
+                text = "Dzień Dobry Polsko witam serdecznie!"
+            )
+        }
+    }
+}
+
+// === NOISE MAP LAYOUT ===
+@Composable
+fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
     Scaffold(
         topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
@@ -304,6 +362,9 @@ object AudioScreen
 
 @Serializable
 object MyCapturesScreen
+
+@Serializable
+object MapsScreen
 
 // Previews
 @Preview(showBackground = true)
