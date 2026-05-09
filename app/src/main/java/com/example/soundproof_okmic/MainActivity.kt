@@ -2,8 +2,10 @@ package com.example.soundproof_okmic
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -39,9 +41,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -74,6 +77,11 @@ class MainActivity : ComponentActivity() {
             System.loadLibrary("native-audio-lib")
         }
     }
+
+    // External functions for Audio handling
+    external fun startAudio(): Boolean
+    external fun stopAudio()
+    external fun getAmplitude(): Float
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -109,6 +117,39 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
     var isRecording by remember { mutableStateOf(false) }
     var loudestDb by remember { mutableFloatStateOf(0.0f) }
     var lowestDb by remember { mutableFloatStateOf(0.0f) }
+
+    // Necessary check of permissions to record from mic
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (!isGranted) {
+            isRecording = false
+        }
+    }
+
+    val micChannelActivity = androidx.compose.ui.platform.LocalContext.current as MainActivity
+
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            // Only if mic recording was allowed
+            if (micChannelActivity.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                micChannelActivity.startAudio()
+                while (isRecording) {
+                    val amp = micChannelActivity.getAmplitude()
+                    if (amp > 0) {
+                        val db = 20 * kotlin.math.log10(amp.toDouble()).toFloat()
+                        if (db > loudestDb) loudestDb = db
+                        if (lowestDb == 0.0f || db < lowestDb) lowestDb = db
+                    }
+                    delay(16) // ~60fps update
+                }
+            } else {
+                permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+        } else {
+            micChannelActivity.stopAudio()
+        }
+    }
 
     Scaffold(
         modifier = modifier,
