@@ -3,20 +3,39 @@
 #include <android/log.h>
 #include <atomic>
 #include <cmath>
+#include <mutex>
+#include "DSPmodule.h"
 
 #define TAG "AudioEngine"
 
 class AudioEngine : public oboe::AudioStreamDataCallback {
+private:
+    std::shared_ptr<oboe::AudioStream> mStream;
+    std::mutex mLock;
+    DSPmodule dspProcessor;
+
 public:
     AudioEngine() = default;
     ~AudioEngine() {
         stop();
     }
 
+    float getLoudestDb() const {
+        return dspProcessor.getMaxDB();
+    }
+
+    float getCurrentDb() const {
+        return dspProcessor.getCurrentDB();
+    }
+
+    float getLowestDb() const {
+        return dspProcessor.getMinDB();
+    }
+
     // return true if correctly started streaming
     bool start() {
         std::lock_guard<std::mutex> lock(mLock);
-        if (mStream) return true; // Already running
+        if (mStream) return true;
 
         oboe::AudioStreamBuilder builder;
         builder.setDirection(oboe::Direction::Input)
@@ -50,34 +69,22 @@ public:
             mStream->stop();
             mStream->close();
             mStream.reset();
-            __android_log_print(ANDROID_LOG_INFO, TAG, "Audio stream stopped");
+            dspProcessor.reset();
+            __android_log_print(ANDROID_LOG_INFO, TAG, "Audio stream stopped, DSP state reset");
         }
     }
 
-    // Get mic data
+    // Get & process mic data
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *audioStream, void *audioData, int32_t numFrames) override {
         if (audioStream->getFormat() == oboe::AudioFormat::Float) {
-            auto *floatData = static_cast<float *>(audioData);
-            float maxAmplitude = 0.0f;
-            for (int i = 0; i < numFrames; ++i) {
-                float absValue = std::abs(floatData[i]);
-                if (absValue > maxAmplitude) maxAmplitude = absValue;
-            }
-            // Atomically update the last peak amplitude
-            mLastPeak.store(maxAmplitude);
+            auto *micData = static_cast<float *>(audioData);
+            dspProcessor.process(micData, numFrames);
+
+            // Now it's possible to retrieve all the data from DSP Getters
+
         }
         return oboe::DataCallbackResult::Continue;
     }
-
-    // Peak amplitude calc
-    float getLastPeakAmplitude() const {
-        return mLastPeak.load();
-    }
-
-private:
-    std::shared_ptr<oboe::AudioStream> mStream;
-    std::atomic<float> mLastPeak{0.0f};
-    std::mutex mLock;
 };
 
 // Singleton engine instance
@@ -95,7 +102,17 @@ extern "C" {
     }
 
     JNIEXPORT jfloat JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getAmplitude(JNIEnv *env, jobject thiz) {
-        return gEngine.getLastPeakAmplitude();
+    Java_com_example_soundproof_1okmic_MainActivity_getLoudestDb(JNIEnv *env, jobject thiz) {
+        return static_cast<jfloat>(gEngine.getLoudestDb());
+    }
+
+    JNIEXPORT jfloat JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_getLowestDb(JNIEnv *env, jobject thiz) {
+        return static_cast<jfloat>(gEngine.getLowestDb());
+    }
+
+    JNIEXPORT jfloat JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_getCurrentDb(JNIEnv *env, jobject thiz) {
+        return static_cast<jfloat>(gEngine.getCurrentDb());
     }
 }

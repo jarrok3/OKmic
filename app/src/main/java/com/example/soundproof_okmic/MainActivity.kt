@@ -1,5 +1,8 @@
 package com.example.soundproof_okmic
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -52,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -64,6 +68,15 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
 import kotlinx.serialization.Serializable
+
+fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
+}
 
 data object InScreenOffset{
     val x = (-12).dp
@@ -81,7 +94,9 @@ class MainActivity : ComponentActivity() {
     // External functions for Audio handling
     external fun startAudio(): Boolean
     external fun stopAudio()
-    external fun getAmplitude(): Float
+    external fun getLoudestDb(): Float
+    external fun getLowestDb(): Float
+    external fun getCurrentDb(): Float
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,6 +132,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
     var isRecording by remember { mutableStateOf(false) }
     var loudestDb by remember { mutableFloatStateOf(0.0f) }
     var lowestDb by remember { mutableFloatStateOf(0.0f) }
+    var currentDb by remember { mutableFloatStateOf(0.0f) }
 
     // Necessary check of permissions to record from mic
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -127,27 +143,27 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
         }
     }
 
-    val micChannelActivity = androidx.compose.ui.platform.LocalContext.current as MainActivity
+    val context = LocalContext.current
+    val micChannelActivity = remember(context) {
+        context.findActivity() as? MainActivity
+    }
 
-    LaunchedEffect(isRecording) {
+    LaunchedEffect(isRecording && micChannelActivity != null) {
         if (isRecording) {
             // Only if mic recording was allowed
-            if (micChannelActivity.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (micChannelActivity?.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 micChannelActivity.startAudio()
                 while (isRecording) {
-                    val amp = micChannelActivity.getAmplitude()
-                    if (amp > 0) {
-                        val db = 20 * kotlin.math.log10(amp.toDouble()).toFloat()
-                        if (db > loudestDb) loudestDb = db
-                        if (lowestDb == 0.0f || db < lowestDb) lowestDb = db
-                    }
-                    delay(16) // ~60fps update
+                    loudestDb = micChannelActivity.getLoudestDb()
+                    lowestDb = micChannelActivity.getLowestDb()
+                    currentDb = micChannelActivity.getCurrentDb()
+                    delay(100) // Update UI every 100ms
                 }
             } else {
                 permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             }
         } else {
-            micChannelActivity.stopAudio()
+            micChannelActivity?.stopAudio()
         }
     }
 
@@ -173,6 +189,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                 horizontalAlignment = Alignment.Start
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
+                Text("Current: $currentDb [dB]")
                 Text("Loudest: $loudestDb [dB]")
                 Text("Lowest: $lowestDb [dB]")
                 HorizontalDivider(
