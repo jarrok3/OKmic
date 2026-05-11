@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
     }
 
     // External functions for Audio handling
+    external fun openAudio()
     external fun startAudio()
     external fun stopAudio()
     external fun setBufferSize(bufferSize: Int)
@@ -164,6 +165,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
         if (isRecording) {
             // Only if mic recording was allowed
             if (micChannelActivity?.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                micChannelActivity.openAudio()
                 micChannelActivity.startAudio()
                 dbHistory.clear()
                 totalSamples = 0L
