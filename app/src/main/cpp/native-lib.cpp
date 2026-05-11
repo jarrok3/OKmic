@@ -13,42 +13,38 @@ private:
     std::shared_ptr<oboe::AudioStream> mStream;
     std::mutex mLock;
     DSPmodule dspProcessor;
-
+    std::atomic<int> buffer_size = 1024;
 public:
     AudioEngine() = default;
-    ~AudioEngine() {
+    ~AudioEngine() override {
         stop();
     }
 
-    float getLoudestDb() const {
-        return dspProcessor.getMaxDB();
-    }
+    void start() {
+        if(buffer_size <= 0 || (buffer_size & (buffer_size - 1)) != 0)
+            {
+                // Don't even bother if the buffer_size is incorrect...
+                __android_log_print(ANDROID_LOG_ERROR, TAG, "Provided buffer_size was NOT a complete power of 2");
+                return;
+        }
 
-    float getCurrentDb() const {
-        return dspProcessor.getCurrentDB();
-    }
-
-    float getLowestDb() const {
-        return dspProcessor.getMinDB();
-    }
-
-    // return true if correctly started streaming
-    bool start() {
-        std::lock_guard<std::mutex> lock(mLock);
-        if (mStream) return true;
+        std::lock_guard<std::mutex> lock(mLock); // Lock for start-stream (Avoid interruptions from UI or other threads)
 
         oboe::AudioStreamBuilder builder;
         builder.setDirection(oboe::Direction::Input)
                ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
                ->setSharingMode(oboe::SharingMode::Exclusive)
                ->setFormat(oboe::AudioFormat::Float)
+               ->setUsage(oboe::Usage::Media)
                ->setChannelCount(oboe::ChannelCount::Mono)
                ->setDataCallback(this);
 
         oboe::Result result = builder.openStream(mStream);
         if (result != oboe::Result::OK) {
-            __android_log_print(ANDROID_LOG_ERROR, TAG, "Error opening stream: %s", oboe::convertToText(result));
-            return false;
+            __android_log_print(ANDROID_LOG_ERROR, TAG,"Failed to create stream. Error: %s", oboe::convertToText(result));
+            mStream->close();
+            mStream.reset();
+            return;
         }
 
         result = mStream->requestStart();
@@ -56,16 +52,16 @@ public:
             __android_log_print(ANDROID_LOG_ERROR, TAG, "Error starting stream: %s", oboe::convertToText(result));
             mStream->close();
             mStream.reset();
-            return false;
         }
 
-        __android_log_print(ANDROID_LOG_INFO, TAG, "Audio stream started successfully");
-        return true;
+        int32_t sampleRate = mStream->getSampleRate();
+        __android_log_print(ANDROID_LOG_INFO, TAG, "Audio stream started with sample rate: %d", sampleRate);
     }
 
     void stop() {
-        std::lock_guard<std::mutex> lock(mLock);
         if (mStream) {
+            std::lock_guard<std::mutex> lock(mLock); // Lock for stop-stream
+
             mStream->stop();
             mStream->close();
             mStream.reset();
@@ -74,11 +70,14 @@ public:
         }
     }
 
+    void setBufferSize(int bs) {
+        this->buffer_size = bs;
+    }
+
     // Get & process mic data
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *audioStream, void *audioData, int32_t numFrames) override {
         if (audioStream->getFormat() == oboe::AudioFormat::Float) {
             auto *micData = static_cast<float *>(audioData);
-            dspProcessor.process(micData, numFrames);
 
             // Now it's possible to retrieve all the data from DSP Getters
 
@@ -90,10 +89,11 @@ public:
 // Singleton engine instance
 static AudioEngine gEngine;
 
+// JNI Integration
 extern "C" {
-    JNIEXPORT jboolean JNICALL
+    JNIEXPORT void JNICALL
     Java_com_example_soundproof_1okmic_MainActivity_startAudio(JNIEnv *env, jobject thiz) {
-        return static_cast<jboolean>(gEngine.start());
+        gEngine.start();
     }
 
     JNIEXPORT void JNICALL
@@ -101,18 +101,8 @@ extern "C" {
         gEngine.stop();
     }
 
-    JNIEXPORT jfloat JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getLoudestDb(JNIEnv *env, jobject thiz) {
-        return static_cast<jfloat>(gEngine.getLoudestDb());
-    }
-
-    JNIEXPORT jfloat JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getLowestDb(JNIEnv *env, jobject thiz) {
-        return static_cast<jfloat>(gEngine.getLowestDb());
-    }
-
-    JNIEXPORT jfloat JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getCurrentDb(JNIEnv *env, jobject thiz) {
-        return static_cast<jfloat>(gEngine.getCurrentDb());
+    JNIEXPORT void JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_setBufferSize(JNIEnv *env, jobject thiz, jint buffer_size) {
+        gEngine.setBufferSize(buffer_size);
     }
 }

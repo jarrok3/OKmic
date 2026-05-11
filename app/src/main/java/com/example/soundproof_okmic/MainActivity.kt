@@ -45,17 +45,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -71,6 +70,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 
 fun Context.findActivity(): Activity? {
@@ -96,11 +96,9 @@ class MainActivity : ComponentActivity() {
     }
 
     // External functions for Audio handling
-    external fun startAudio(): Boolean
+    external fun startAudio()
     external fun stopAudio()
-    external fun getLoudestDb(): Float
-    external fun getLowestDb(): Float
-    external fun getCurrentDb(): Float
+    external fun setBufferSize(bufferSize: Int)
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,6 +125,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onPause() {
+        super.onPause()
+        stopAudio()
+    }
 }
 
 // === MAIN LAYOUT ===
@@ -140,7 +143,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
 
     // Historia próbek i licznik czasu
     val dbHistory = remember { mutableStateListOf<Float>() }
-    var totalSamples by remember { mutableStateOf(0L) }
+    var totalSamples by remember { mutableLongStateOf(0L) }
     val maxHistorySize = 100
 
     // Necessary check of permissions to record from mic
@@ -165,9 +168,6 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                 dbHistory.clear()
                 totalSamples = 0L
                 while (isRecording) {
-                    loudestDb = micChannelActivity.getLoudestDb()
-                    lowestDb = micChannelActivity.getLowestDb()
-                    currentDb = micChannelActivity.getCurrentDb()
 
                     dbHistory.add(currentDb)
                     totalSamples++

@@ -53,11 +53,11 @@ void DSPmodule::process(const float* data, int numFrames){
     if (currentDB < minDB)
         minDB = currentDB;
 
-    curr_totalof_samples += numFrames;
-    if(curr_totalof_samples >= getWindowSize()){
-        fftResults = _fourierTransform(data, curr_totalof_samples);
-        curr_totalof_samples = 0;
-    }
+//    curr_totalof_samples += numFrames;
+//    if(curr_totalof_samples >= getWindowSize()){
+//        fftResults = _fourierTransform(data, curr_totalof_samples);
+//        curr_totalof_samples = 0;
+//    }
 }
 
 float DSPmodule::_calcRMS(const float* data, int numFrames) const{
