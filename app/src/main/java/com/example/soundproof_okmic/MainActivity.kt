@@ -49,6 +49,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,6 +57,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -134,6 +138,11 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
     var lowestDb by remember { mutableFloatStateOf(0.0f) }
     var currentDb by remember { mutableFloatStateOf(0.0f) }
 
+    // Historia próbek i licznik czasu
+    val dbHistory = remember { mutableStateListOf<Float>() }
+    var totalSamples by remember { mutableStateOf(0L) }
+    val maxHistorySize = 100
+
     // Necessary check of permissions to record from mic
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -153,10 +162,19 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
             // Only if mic recording was allowed
             if (micChannelActivity?.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 micChannelActivity.startAudio()
+                dbHistory.clear()
+                totalSamples = 0L
                 while (isRecording) {
                     loudestDb = micChannelActivity.getLoudestDb()
                     lowestDb = micChannelActivity.getLowestDb()
                     currentDb = micChannelActivity.getCurrentDb()
+
+                    dbHistory.add(currentDb)
+                    totalSamples++
+                    if (dbHistory.size > maxHistorySize) {
+                        dbHistory.removeAt(0)
+                    }
+
                     delay(100) // Update UI every 100ms
                 }
             } else {
@@ -194,12 +212,12 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                 Text("Lowest: $lowestDb [dB]")
                 HorizontalDivider(
                     modifier = Modifier
-                        .padding(vertical = 8.dp)
+                        .padding(vertical = 16.dp)
                         .fillMaxWidth(),
                     thickness = DividerDefaults.Thickness,
                     color = DividerDefaults.color
                 )
-                AudioCanvas(isRecording = isRecording)
+                AudioCanvas(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
             }
         }
     }
@@ -351,10 +369,15 @@ fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> U
 }
 
 @Composable
-fun AudioCanvas(isRecording: Boolean)
+fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long)
 {
-    if(isRecording)
+    if(isRecording && dbHistory.isNotEmpty())
     {
+        val strokeColor = MaterialTheme.colorScheme.primary
+        val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+        val textMeasurer = rememberTextMeasurer()
+        val textStyle = TextStyle(fontSize = MaterialTheme.typography.labelSmall.fontSize, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
         Canvas(
             modifier = Modifier
                 .padding(0.dp)
@@ -365,12 +388,76 @@ fun AudioCanvas(isRecording: Boolean)
                 )
         )
         {
-            drawLine(
-                color = Color.Blue,
-                start = Offset(0f, 0f),
-                end = Offset(size.width, size.height),
-                strokeWidth = 10f
-            )
+            val leftMargin = 50.dp.toPx()
+            val bottomMargin = 40.dp.toPx()
+            val graphWidth = size.width - leftMargin
+            val graphHeight = size.height - bottomMargin
+            
+            val maxSamples = 100 
+            val dx = graphWidth / (maxSamples - 1)
+            
+            val minDb = -100f
+            val maxDb = 0f
+
+            // --- PODZIAŁKA Y (dB) ---
+            for (db in -100..0 step 20) {
+                val y = graphHeight - ((db - minDb) / (maxDb - minDb) * graphHeight)
+                drawLine(
+                    color = gridColor,
+                    start = Offset(leftMargin, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1f
+                )
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = "$db",
+                    style = textStyle,
+                    topLeft = Offset(5.dp.toPx(), y - 10.dp.toPx())
+                )
+            }
+
+            // --- PODZIAŁKA X (Czas) ---
+            val firstSampleIndex = totalSamples - dbHistory.size
+            for (i in 0 until dbHistory.size) {
+                val absoluteIndex = firstSampleIndex + i
+                if (absoluteIndex >= 0 && absoluteIndex % 20 == 0L) { // Co 2 sekundy (20 * 100ms)
+                    val x = leftMargin + (i * dx)
+                    val timeSeconds = absoluteIndex / 10
+                    
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(x, 0f),
+                        end = Offset(x, graphHeight),
+                        strokeWidth = 1f
+                    )
+                    drawText(
+                        textMeasurer = textMeasurer,
+                        text = "${timeSeconds}s",
+                        style = textStyle,
+                        topLeft = Offset(x - 10.dp.toPx(), graphHeight + 5.dp.toPx())
+                    )
+                }
+            }
+
+            // --- WYKRES ---
+            for (i in 0 until dbHistory.size - 1) {
+                val startX = leftMargin + (i * dx)
+                val startY = graphHeight - ((dbHistory[i] - minDb) / (maxDb - minDb) * graphHeight)
+                
+                val endX = leftMargin + ((i + 1) * dx)
+                val endY = graphHeight - ((dbHistory[i + 1] - minDb) / (maxDb - minDb) * graphHeight)
+                
+                drawLine(
+                    color = strokeColor,
+                    start = Offset(startX, startY.coerceIn(0f, graphHeight)),
+                    end = Offset(endX, endY.coerceIn(0f, graphHeight)),
+                    strokeWidth = 4f
+                )
+            }
+
+            // Osie
+            drawLine(textStyle.color, Offset(leftMargin, 0f), Offset(leftMargin, graphHeight), 2f)
+            drawLine(textStyle.color, Offset(leftMargin, graphHeight), Offset(size.width, graphHeight), 2f)
         }
     }
 }
