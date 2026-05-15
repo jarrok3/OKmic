@@ -13,7 +13,6 @@ private:
     std::shared_ptr<oboe::AudioStream> mStream;
     std::mutex mLock;
     DSPmodule dspProcessor;
-    std::atomic<int> buffer_size = 1024;
 
 public:
     AudioEngine() = default;
@@ -22,6 +21,7 @@ public:
     bool openStream();
     bool startStream();
     void stopStream();
+    void setFWindowSize(int bs);
     void setBufferSize(int bs);
 
     oboe::DataCallbackResult onAudioReady(

@@ -13,10 +13,10 @@ AudioEngine::~AudioEngine() {
 }
 
 bool AudioEngine::openStream() {
-    if(buffer_size <= 0 || (buffer_size & (buffer_size - 1)) != 0)
+    if(dspProcessor.getFWindowSize() <= 0 || (dspProcessor.getFWindowSize() & (dspProcessor.getFWindowSize() - 1)) != 0)
     {
         // Don't even bother if the buffer_size is incorrect...
-        __android_log_print(ANDROID_LOG_ERROR, TAG, "Provided buffer_size was NOT a complete power of 2");
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Provided fwindowSize was NOT a complete power of 2");
         return false;
     }
 
@@ -74,17 +74,25 @@ void AudioEngine::stopStream() {
     }
 }
 
+void AudioEngine::setFWindowSize(int bs) {
+    if(bs < 0 || (bs & (bs-1)) != 0)
+        throw std::invalid_argument("AudioEngine: Tried assigning wrong value to Fourier Window Size");
+    this->dspProcessor.setFWindowSize(bs);
+}
+
 void AudioEngine::setBufferSize(int bs) {
-    this->buffer_size = bs;
+    if(bs < 0 || (bs & (bs-1)) != 0)
+        throw std::invalid_argument("AudioEngine: Tried assigning wrong value to Fourier Window Size");
+    this->dspProcessor.setBufferSize(bs);
 }
 
 // Get & process mic data
 oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *audioStream, void *audioData, int32_t numFrames) {
     if (audioStream->getFormat() == oboe::AudioFormat::Float) {
         auto *micData = static_cast<float *>(audioData);
-
-        // Now it's possible to retrieve all the data from DSP Getters
-
+        dspProcessor.process(micData, numFrames);
     }
     return oboe::DataCallbackResult::Continue;
 }
+
+

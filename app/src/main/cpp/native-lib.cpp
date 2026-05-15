@@ -29,6 +29,11 @@ extern "C" {
     }
 
     JNIEXPORT void JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_setFWindowSize(JNIEnv *env, jobject thiz, jint fwindow_size) {
+        gEngine->setFWindowSize(fwindow_size);
+    }
+
+    JNIEXPORT void JNICALL
     Java_com_example_soundproof_1okmic_MainActivity_setBufferSize(JNIEnv *env, jobject thiz, jint buffer_size) {
         gEngine->setBufferSize(buffer_size);
     }
