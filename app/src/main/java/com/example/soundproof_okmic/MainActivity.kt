@@ -231,6 +231,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     color = DividerDefaults.color
                 )
                 AudioCanvasDB(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
+                AudioCanvasFFT(isRecording = isRecording, fftResults = fftResults.toList())
             }
         }
     }
@@ -372,13 +373,6 @@ fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> U
             contentDescription = "Record_audio"
         )
     }
-
-    // The refresh event is processed by the ViewModel that is in charge
-    // of the UI's business logic.
-//        Button(onClick = { viewModel.refreshNews() }) {
-//            Text("Refresh data")
-//        }
-
 }
 
 @Composable
@@ -433,7 +427,7 @@ fun AudioCanvasDB(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Lo
             val firstSampleIndex = totalSamples - dbHistory.size
             for (i in 0 until dbHistory.size) {
                 val absoluteIndex = firstSampleIndex + i
-                if (absoluteIndex >= 0 && absoluteIndex % 20 == 0L) { // Co 2 sekundy (20 * 100ms)
+                if (absoluteIndex >= 0 && absoluteIndex % 20 == 0L) {
                     val x = leftMargin + (i * dx)
                     val timeSeconds = absoluteIndex / 10
                     
@@ -475,6 +469,88 @@ fun AudioCanvasDB(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Lo
     }
 }
 
+@Composable
+fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
+{
+    if(isRecording && fftResults.isNotEmpty())
+    {
+        val strokeColor = MaterialTheme.colorScheme.primary
+        val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+        val textMeasurer = rememberTextMeasurer()
+        val textStyle = TextStyle(fontSize = MaterialTheme.typography.labelSmall.fontSize, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Canvas(
+            modifier = Modifier
+                .padding(0.dp)
+                .fillMaxWidth()
+                .height(400.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.background
+                )
+        )
+        {
+            val leftMargin = 50.dp.toPx()
+            val bottomMargin = 40.dp.toPx()
+            val graphWidth = size.width - leftMargin
+            val graphHeight = size.height - bottomMargin
+
+            val barWidth = graphWidth / fftResults.size
+
+            val minDb = -80f
+            val maxDb = -20f
+
+            // --- Y AXIS (RELATIVE SOUND LEVEL) ---
+            for (db in -100..0 step 20) {
+                val y = graphHeight - ((db - minDb) / (maxDb - minDb) * graphHeight)
+                drawLine(
+                    color = gridColor,
+                    start = Offset(leftMargin, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1f
+                )
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = "$db",
+                    style = textStyle,
+                    topLeft = Offset(5.dp.toPx(), y - 10.dp.toPx())
+                )
+            }
+
+            // --- X AXIS (FREQUENCY) ---
+            val labels = listOf("0", "5k", "10k", "15k", "20k")
+            labels.forEachIndexed { index, label ->
+                val x = leftMargin + (index.toFloat() / (labels.size - 1)) * graphWidth
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = label,
+                    style = textStyle,
+                    topLeft = Offset(x - 10.dp.toPx(), graphHeight + 5.dp.toPx())
+                )
+            }
+
+            // --- SPECTRUM BARS ---
+            for (i in fftResults.indices) {
+                val x = leftMargin + (i * barWidth)
+                val magnitude = fftResults[i]
+                val normalizedMag = ((magnitude - minDb) / (maxDb - minDb)).coerceIn(0f, 1f)
+                val barHeight = normalizedMag * graphHeight
+
+                drawRect(
+                    color = strokeColor,
+                    topLeft = Offset(x, graphHeight - barHeight),
+                    size = androidx.compose.ui.geometry.Size(
+                        width = barWidth.coerceAtLeast(1f),
+                        height = barHeight
+                    )
+                )
+            }
+
+            // Axis lines
+            drawLine(textStyle.color, Offset(leftMargin, 0f), Offset(leftMargin, graphHeight), 2f)
+            drawLine(textStyle.color, Offset(leftMargin, graphHeight), Offset(size.width, graphHeight), 2f)
+        }
+    }
+}
 
 // === MY CAPTURES LAYOUT ===
 @Composable
