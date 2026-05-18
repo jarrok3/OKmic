@@ -100,6 +100,7 @@ class MainActivity : ComponentActivity() {
     external fun startAudio()
     external fun stopAudio()
     external fun setBufferSize(bufferSize: Int)
+    external fun getAudioResults(): FloatArray?
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -141,6 +142,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
     var loudestDb by remember { mutableFloatStateOf(0.0f) }
     var lowestDb by remember { mutableFloatStateOf(0.0f) }
     var currentDb by remember { mutableFloatStateOf(0.0f) }
+    var fftResults by remember { mutableStateOf(floatArrayOf()) }
 
     // Historia próbek i licznik czasu
     val dbHistory = remember { mutableStateListOf<Float>() }
@@ -170,6 +172,15 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                 dbHistory.clear()
                 totalSamples = 0L
                 while (isRecording) {
+                    val results = micChannelActivity.getAudioResults()
+                    if (results != null && results.size >= 3) {
+                        currentDb = results[0]
+                        loudestDb = results[1]
+                        lowestDb = results[2]
+                        if (results.size > 3) {
+                            fftResults = results.sliceArray(3 until results.size)
+                        }
+                    }
 
                     dbHistory.add(currentDb)
                     totalSamples++
@@ -219,7 +230,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     thickness = DividerDefaults.Thickness,
                     color = DividerDefaults.color
                 )
-                AudioCanvas(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
+                AudioCanvas(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples, fftResults = fftResults)
             }
         }
     }
@@ -371,7 +382,7 @@ fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> U
 }
 
 @Composable
-fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long)
+fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long, fftResults: FloatArray = floatArrayOf())
 {
     if(isRecording && dbHistory.isNotEmpty())
     {

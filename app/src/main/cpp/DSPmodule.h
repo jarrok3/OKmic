@@ -8,9 +8,11 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include "AudioDataListener.h"
 
 class DSPmodule{
 private:
+    AudioDataListener* listener = nullptr;
     float currentDB;
     float maxDB;
     float minDB;
@@ -40,6 +42,7 @@ public:
     ~DSPmodule();
     void process(const float* data, int numFrames); // invoked from the manager class audio callback
     bool reset();
+    void setListener(AudioDataListener* newDataListener) { listener = newDataListener; }
 
     // Getters
     float getCurrentDB() const {return currentDB;};

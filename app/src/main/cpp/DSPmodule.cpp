@@ -81,6 +81,17 @@ void DSPmodule::_processingLoop(){
         if (currentDB < minDB) minDB = currentDB;
 
         latestFourierResults = _fourierTransform(workingBuffer);
+
+        // Notify the engine, invoke event
+        AudioResults results = {
+                currentDB,
+                maxDB,
+                minDB,
+                latestFourierResults
+        };
+        if (listener != nullptr) {
+            listener->onAudioDataReady(results);
+        }
     }
 }
 

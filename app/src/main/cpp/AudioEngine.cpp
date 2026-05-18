@@ -8,12 +8,16 @@
 
 #define TAG "AudioEngine"
 
+AudioEngine::AudioEngine() : dspProcessor(std::make_unique<DSPmodule>()) {
+    dspProcessor->setListener(this);
+}
+
 AudioEngine::~AudioEngine() {
     stopStream();
 }
 
 bool AudioEngine::openStream() {
-    if(dspProcessor.getFWindowSize() <= 0 || (dspProcessor.getFWindowSize() & (dspProcessor.getFWindowSize() - 1)) != 0)
+    if(dspProcessor->getFWindowSize() <= 0 || (dspProcessor->getFWindowSize() & (dspProcessor->getFWindowSize() - 1)) != 0)
     {
         // Don't even bother if the buffer_size is incorrect...
         __android_log_print(ANDROID_LOG_ERROR, TAG, "Provided fwindowSize was NOT a complete power of 2");
@@ -69,7 +73,7 @@ void AudioEngine::stopStream() {
         mStream->stop();
         mStream->close();
         mStream.reset();
-        dspProcessor.reset();
+        dspProcessor->reset();
         __android_log_print(ANDROID_LOG_INFO, TAG, "Audio stream stopped, DSP state reset");
     }
 }
@@ -77,7 +81,7 @@ void AudioEngine::stopStream() {
 void AudioEngine::setFWindowSize(int bs) {
     if(bs < 0 || (bs & (bs-1)) != 0)
         throw std::invalid_argument("AudioEngine: Tried assigning wrong value to Fourier Window Size");
-    this->dspProcessor.setFWindowSize(bs);
+    this->dspProcessor->setFWindowSize(bs);
 }
 
 void AudioEngine::setBufferSize(int bs) {
@@ -86,9 +90,9 @@ void AudioEngine::setBufferSize(int bs) {
 
     if (mStream->getState() == oboe::StreamState::Started){
         stopStream();
-        this->dspProcessor.setBufferSize(bs);
+        this->dspProcessor->setBufferSize(bs);
     } else {
-        this->dspProcessor.setBufferSize(bs);
+        this->dspProcessor->setBufferSize(bs);
     }
 }
 
@@ -96,13 +100,19 @@ void AudioEngine::setBufferSize(int bs) {
 oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *audioStream, void *audioData, int32_t numFrames) {
     if (audioStream->getFormat() == oboe::AudioFormat::Float) {
         auto *micData = static_cast<float *>(audioData);
-        dspProcessor.process(micData, numFrames);
+        dspProcessor->process(micData, numFrames);
     }
     return oboe::DataCallbackResult::Continue;
 }
 
-void AudioEngine::isDataReadyListener() {
-    // if data == ready -> get that data and send upwards
+void AudioEngine::onAudioDataReady(const AudioResults& results) {
+    std::lock_guard<std::mutex> lock(mResultsLock);
+    mLatestResults = results;
+}
+
+AudioResults AudioEngine::getLatestResults() {
+    std::lock_guard<std::mutex> lock(mResultsLock);
+    return mLatestResults;
 }
 
 

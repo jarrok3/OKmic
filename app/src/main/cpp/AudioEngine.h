@@ -7,15 +7,19 @@
 #include <memory>
 #include <mutex>
 #include "DSPmodule.h"
+#include "AudioDataListener.h"
 
-class AudioEngine : public oboe::AudioStreamDataCallback {
+class AudioEngine : public oboe::AudioStreamDataCallback, public AudioDataListener {
 private:
     std::shared_ptr<oboe::AudioStream> mStream;
     std::mutex mLock;
-    DSPmodule dspProcessor;
+    std::unique_ptr<DSPmodule> dspProcessor;
+
+    AudioResults mLatestResults;
+    std::mutex mResultsLock;
 
 public:
-    AudioEngine() = default;
+    AudioEngine();
     ~AudioEngine() override;
 
     bool openStream();
@@ -29,7 +33,8 @@ public:
             void *audioData,
             int32_t numFrames) override;
 
-    void isDataReadyListener();
+    void onAudioDataReady(const AudioResults& results) override;
+    AudioResults getLatestResults();
 };
 
 #endif //SOUNDPROOF_OKMIC_AUDIOENGINE_H
