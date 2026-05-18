@@ -33,16 +33,23 @@
  * myQueue.pop(value);
  *
  * @tparam T - The item type
- * @tparam CAPACITY - Maximum number of items which can be held in the queue. Must be a power of 2.
  * Must be less than the maximum value permissible in INDEX_TYPE
  * @tparam INDEX_TYPE - The internal index type, defaults to uint32_t. Changing this will affect
  * the maximum capacity. Included for ease of unit testing because testing queue lengths of
  * UINT32_MAX can be time consuming and is not always possible.
  */
 
-template <typename T, uint32_t CAPACITY, typename INDEX_TYPE = uint32_t>
+template <typename T, typename INDEX_TYPE = uint32_t>
 class LockFreeQueue {
 public:
+    // Dynamic Buffer size Queue constructors
+    LockFreeQueue(uint32_t capacity) : mCapacity(capacity) {
+            mBuffer = new T[mCapacity];
+    }
+
+    ~LockFreeQueue() {
+        delete[] mBuffer;
+    }
 
     /**
      * Implementation details:
@@ -59,7 +66,6 @@ public:
      */
 
     static constexpr bool isPowerOfTwo(uint32_t n) { return (n & (n - 1)) == 0; }
-    static_assert(isPowerOfTwo(CAPACITY), "Capacity must be a power of 2");
     static_assert(std::is_unsigned<INDEX_TYPE>::value, "Index type must be unsigned");
 
     /**
@@ -72,7 +78,7 @@ public:
         if (isEmpty()){
             return false;
         } else {
-            val = buffer[mask(readCounter)];
+            val = mBuffer[mask(readCounter)];
             ++readCounter;
             return true;
         }
@@ -88,7 +94,7 @@ public:
         if (isFull()){
             return false;
         } else {
-            buffer[mask(writeCounter)] = item;
+            mBuffer[mask(writeCounter)] = item;
             ++writeCounter;
             return true;
         }
@@ -104,7 +110,7 @@ public:
         if (isEmpty()){
             return false;
         } else {
-            item = buffer[mask(readCounter)];
+            item = mBuffer[mask(readCounter)];
             return true;
         }
     }
@@ -141,11 +147,12 @@ private:
 
     bool isEmpty() const { return readCounter == writeCounter; }
 
-    bool isFull() const { return size() == CAPACITY; }
+    bool isFull() const { return size() == mCapacity; }
 
-    INDEX_TYPE mask(INDEX_TYPE n) const { return static_cast<INDEX_TYPE>(n & (CAPACITY - 1)); }
+    INDEX_TYPE mask(INDEX_TYPE n) const { return static_cast<INDEX_TYPE>(n & (mCapacity - 1)); }
 
-    T buffer[CAPACITY];
+    const uint32_t mCapacity;
+    T* mBuffer;
     std::atomic<INDEX_TYPE> writeCounter { 0 };
     std::atomic<INDEX_TYPE> readCounter { 0 };
 

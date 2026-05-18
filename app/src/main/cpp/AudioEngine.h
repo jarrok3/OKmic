@@ -29,6 +29,7 @@ public:
             void *audioData,
             int32_t numFrames) override;
 
+    void isDataReadyListener();
 };
 
 #endif //SOUNDPROOF_OKMIC_AUDIOENGINE_H
