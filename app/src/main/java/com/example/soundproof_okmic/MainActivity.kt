@@ -15,10 +15,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -674,14 +676,15 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
         )
     ) {
         Surface(
-            modifier = modifier,
+            modifier = modifier.fillMaxWidth().padding(16.dp),
             shape = MaterialTheme.shapes.large,
             tonalElevation = AlertDialogDefaults.TonalElevation
         ){
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(8.dp)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             )
             {
                 Text(
@@ -704,116 +707,139 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                 }
 
                 // BUFFER SIZE
-                Text("Select buffer size: ")
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                )
-                {
-                    IconButton(
-                        onClick = { expandedBufferMenu = !expandedBufferMenu }
-                    ) {
-                        Text("$selectedBufferSize")
-                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Select buffer size: ")
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .clickable { expandedBufferMenu = !expandedBufferMenu }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("$selectedBufferSize")
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                        }
 
-                    DropdownMenu(
-                        expanded = expandedBufferMenu,
-                        onDismissRequest = {expandedBufferMenu = false}
-                    ){
-                        DropdownMenuItem(
-                            text = { Text("512") },
-                            onClick = { selectedBufferSize = 512; expandedBufferMenu = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("1024") },
-                            onClick = { selectedBufferSize = 1024; expandedBufferMenu = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("2048") },
-                            onClick = { selectedBufferSize = 2048; expandedBufferMenu = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("4096") },
-                            onClick = { selectedBufferSize = 4096; expandedBufferMenu = false }
-                        )
+                        DropdownMenu(
+                            expanded = expandedBufferMenu,
+                            onDismissRequest = {expandedBufferMenu = false}
+                        ){
+                            DropdownMenuItem(
+                                text = { Text("512") },
+                                onClick = { selectedBufferSize = 512; expandedBufferMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("1024") },
+                                onClick = { selectedBufferSize = 1024; expandedBufferMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("2048") },
+                                onClick = { selectedBufferSize = 2048; expandedBufferMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("4096") },
+                                onClick = { selectedBufferSize = 4096; expandedBufferMenu = false }
+                            )
+                        }
                     }
                 }
 
-                // FWINDOW SIZE
-                Text("Select window size: ")
+                // WINDOW SIZE
                 if(selectedBufferSize<selectedWindowSize)
                 {
                     selectedWindowSize = selectedBufferSize
                 }
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                )
-                {
-                    IconButton(
-                        onClick = { expandedWindowMenu = !expandedWindowMenu }
-                    ) {
-                        Text("$selectedWindowSize")
-                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Select window size: ")
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .clickable { expandedWindowMenu = !expandedWindowMenu }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("$selectedWindowSize")
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                        }
 
-                    DropdownMenu(
-                        expanded = expandedWindowMenu,
-                        onDismissRequest = {expandedWindowMenu = false}
-                    ){
-                        DropdownMenuItem(
-                            text = { Text("512") },
-                            onClick = { selectedWindowSize = 512; expandedWindowMenu = false }
-                        )
-                        if(selectedBufferSize>=1024){
+                        DropdownMenu(
+                            expanded = expandedWindowMenu,
+                            onDismissRequest = {expandedWindowMenu = false}
+                        ){
                             DropdownMenuItem(
-                                text = { Text("1024") },
-                                onClick = { selectedWindowSize = 1024; expandedWindowMenu = false }
+                                text = { Text("512") },
+                                onClick = { selectedWindowSize = 512; expandedWindowMenu = false }
                             )
-                        }
-                        if(selectedBufferSize>=2048) {
-                            DropdownMenuItem(
-                                text = { Text("2048") },
-                                onClick = { selectedWindowSize = 2048; expandedWindowMenu = false }
-                            )
-                        }
-                        if(selectedBufferSize>=4096) {
-                            DropdownMenuItem(
-                                text = { Text("4096") },
-                                onClick = { selectedWindowSize = 4096; expandedWindowMenu = false }
-                            )
+                            if(selectedBufferSize>=1024){
+                                DropdownMenuItem(
+                                    text = { Text("1024") },
+                                    onClick = { selectedWindowSize = 1024; expandedWindowMenu = false }
+                                )
+                            }
+                            if(selectedBufferSize>=2048) {
+                                DropdownMenuItem(
+                                    text = { Text("2048") },
+                                    onClick = { selectedWindowSize = 2048; expandedWindowMenu = false }
+                                )
+                            }
+                            if(selectedBufferSize>=4096) {
+                                DropdownMenuItem(
+                                    text = { Text("4096") },
+                                    onClick = { selectedWindowSize = 4096; expandedWindowMenu = false }
+                                )
+                            }
                         }
                     }
                 }
 
                 // WINDOW ALGORITHM
-                Text("Select windowing algorithm: ")
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                )
-                {
-                    IconButton(
-                        onClick = { expandedAlgoMenu = !expandedAlgoMenu }
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Select windowing algorithm: ")
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(selectedAlgo)
-                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
-                    }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedAlgoMenu = !expandedAlgoMenu }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(selectedAlgo)
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                        }
 
-                    DropdownMenu(
-                        expanded = expandedAlgoMenu,
-                        onDismissRequest = {expandedAlgoMenu = false}
-                    ){
-                        DropdownMenuItem(
-                            text = { Text("Hann") },
-                            onClick = { selectedAlgo = "Hann"; expandedAlgoMenu = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Hamming") },
-                            onClick = { selectedAlgo = "Hamming"; expandedAlgoMenu = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Blackman") },
-                            onClick = { selectedAlgo = "Blackman"; expandedAlgoMenu = false }
-                        )
+                        DropdownMenu(
+                            expanded = expandedAlgoMenu,
+                            onDismissRequest = {expandedAlgoMenu = false}
+                        ){
+                            DropdownMenuItem(
+                                text = { Text("Hann") },
+                                onClick = { selectedAlgo = "Hann"; expandedAlgoMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Hamming") },
+                                onClick = { selectedAlgo = "Hamming"; expandedAlgoMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Blackman") },
+                                onClick = { selectedAlgo = "Blackman"; expandedAlgoMenu = false }
+                            )
+                        }
                     }
                 }
 
@@ -822,7 +848,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        TODO()
+                        onDismiss()
                     }
                 ) {
                     Text("Apply Changes")
