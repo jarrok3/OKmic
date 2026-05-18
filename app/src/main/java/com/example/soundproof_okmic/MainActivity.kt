@@ -1,8 +1,12 @@
 package com.example.soundproof_okmic
 
+import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -23,12 +27,20 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.FiberSmartRecord
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AlertDialogDefaults
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -41,12 +53,15 @@ import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,12 +70,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -71,7 +88,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
 import kotlinx.serialization.Serializable
+import kotlin.math.exp
 
 fun Context.findActivity(): Activity? {
     var context = this
@@ -100,6 +119,7 @@ class MainActivity : ComponentActivity() {
     external fun startAudio()
     external fun stopAudio()
     external fun setBufferSize(bufferSize: Int)
+    external fun setFWindowSize(fwindowSize: Int)
     external fun getAudioResults(): FloatArray?
 
     // Main
@@ -166,7 +186,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
     LaunchedEffect(isRecording && micChannelActivity != null) {
         if (isRecording) {
             // Only if mic recording was allowed
-            if (micChannelActivity?.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (micChannelActivity?.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 micChannelActivity.openAudio()
                 micChannelActivity.startAudio()
                 dbHistory.clear()
@@ -191,7 +211,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     delay(100) // Update UI every 100ms
                 }
             } else {
-                permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         } else {
             micChannelActivity?.stopAudio()
@@ -270,6 +290,14 @@ fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
 fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
 {
     var expanded by remember {mutableStateOf(false)}
+    var showSettings by remember {mutableStateOf(false)}
+
+    if(showSettings)
+    {
+        SettingsDialogueWindow(
+            onDismiss = { showSettings = false }
+        )
+    }
 
     Box(
         modifier = modifier
@@ -288,6 +316,12 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
             DropdownMenuItem(
                 modifier = Modifier.fillMaxWidth(),
                 text = { Text("My Captures") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.History,
+                        contentDescription = "MyCaptures"
+                    )
+                },
                 onClick = {
                     expanded = false
                     navController.navigate(MyCapturesScreen) {
@@ -300,8 +334,37 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
                 },
                 colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary)
             )
+            DropdownMenuItem(
+                modifier = Modifier.fillMaxWidth(),
+                text = { Text("Settings") },
+                onClick = {
+                    expanded = false
+                    showSettings = true
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings"
+                    )
+                },
+                colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary),
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                modifier = Modifier.fillMaxWidth(),
+                text = { Text("About/Help") },
+                onClick = {  },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Info,
+                        contentDescription = "About/Help"
+                    )
+                },
+                colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary),
+            )
         }
     }
+
 }
 
 @Composable
@@ -538,7 +601,7 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
                 drawRect(
                     color = strokeColor,
                     topLeft = Offset(x, graphHeight - barHeight),
-                    size = androidx.compose.ui.geometry.Size(
+                    size = Size(
                         width = barWidth.coerceAtLeast(1f),
                         height = barHeight
                     )
@@ -586,6 +649,185 @@ fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
             Text(
                 text = "Dzień Dobry Polsko witam serdecznie!"
             )
+        }
+    }
+}
+
+// === SETTINGS DIALOG MENU ===
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
+{
+    var enableNoiseGate by remember{ mutableStateOf(false) }
+    var sliderPosition by remember { mutableFloatStateOf(0f) }
+    var expandedBufferMenu by remember { mutableStateOf(false) }
+    var selectedBufferSize by remember { mutableIntStateOf(1024) }
+    var expandedWindowMenu by remember { mutableStateOf(false) }
+    var selectedWindowSize by remember { mutableIntStateOf(1024) }
+    var expandedAlgoMenu by remember { mutableStateOf(false) }
+    var selectedAlgo by remember { mutableStateOf("Hann") }
+
+    BasicAlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            windowTitle = "Settings"
+        )
+    ) {
+        Surface(
+            modifier = modifier,
+            shape = MaterialTheme.shapes.large,
+            tonalElevation = AlertDialogDefaults.TonalElevation
+        ){
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+            )
+            {
+                Text(
+                    text = "Remember to apply your changes before leaving this window"
+                )
+
+                // NOISE GATE
+                Text(text = "Enable Noise Gate")
+                Checkbox(
+                    checked = enableNoiseGate,
+                    onCheckedChange = {enableNoiseGate = it}
+                )
+                if(enableNoiseGate)
+                {
+                    Slider(
+                        value = sliderPosition,
+                        onValueChange = { sliderPosition = it },
+                        valueRange = -80f..0f
+                    )
+                }
+
+                // BUFFER SIZE
+                Text("Select buffer size: ")
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                )
+                {
+                    IconButton(
+                        onClick = { expandedBufferMenu = !expandedBufferMenu }
+                    ) {
+                        Text("$selectedBufferSize")
+                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                    }
+
+                    DropdownMenu(
+                        expanded = expandedBufferMenu,
+                        onDismissRequest = {expandedBufferMenu = false}
+                    ){
+                        DropdownMenuItem(
+                            text = { Text("512") },
+                            onClick = { selectedBufferSize = 512; expandedBufferMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("1024") },
+                            onClick = { selectedBufferSize = 1024; expandedBufferMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("2048") },
+                            onClick = { selectedBufferSize = 2048; expandedBufferMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("4096") },
+                            onClick = { selectedBufferSize = 4096; expandedBufferMenu = false }
+                        )
+                    }
+                }
+
+                // FWINDOW SIZE
+                Text("Select window size: ")
+                if(selectedBufferSize<selectedWindowSize)
+                {
+                    selectedWindowSize = selectedBufferSize
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                )
+                {
+                    IconButton(
+                        onClick = { expandedWindowMenu = !expandedWindowMenu }
+                    ) {
+                        Text("$selectedWindowSize")
+                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                    }
+
+                    DropdownMenu(
+                        expanded = expandedWindowMenu,
+                        onDismissRequest = {expandedWindowMenu = false}
+                    ){
+                        DropdownMenuItem(
+                            text = { Text("512") },
+                            onClick = { selectedWindowSize = 512; expandedWindowMenu = false }
+                        )
+                        if(selectedBufferSize>=1024){
+                            DropdownMenuItem(
+                                text = { Text("1024") },
+                                onClick = { selectedWindowSize = 1024; expandedWindowMenu = false }
+                            )
+                        }
+                        if(selectedBufferSize>=2048) {
+                            DropdownMenuItem(
+                                text = { Text("2048") },
+                                onClick = { selectedWindowSize = 2048; expandedWindowMenu = false }
+                            )
+                        }
+                        if(selectedBufferSize>=4096) {
+                            DropdownMenuItem(
+                                text = { Text("4096") },
+                                onClick = { selectedWindowSize = 4096; expandedWindowMenu = false }
+                            )
+                        }
+                    }
+                }
+
+                // WINDOW ALGORITHM
+                Text("Select windowing algorithm: ")
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                )
+                {
+                    IconButton(
+                        onClick = { expandedAlgoMenu = !expandedAlgoMenu }
+                    ) {
+                        Text(selectedAlgo)
+                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                    }
+
+                    DropdownMenu(
+                        expanded = expandedAlgoMenu,
+                        onDismissRequest = {expandedAlgoMenu = false}
+                    ){
+                        DropdownMenuItem(
+                            text = { Text("Hann") },
+                            onClick = { selectedAlgo = "Hann"; expandedAlgoMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Hamming") },
+                            onClick = { selectedAlgo = "Hamming"; expandedAlgoMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Blackman") },
+                            onClick = { selectedAlgo = "Blackman"; expandedAlgoMenu = false }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        TODO()
+                    }
+                ) {
+                    Text("Apply Changes")
+                }
+            }
         }
     }
 }
