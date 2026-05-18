@@ -144,7 +144,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
     var currentDb by remember { mutableFloatStateOf(0.0f) }
     var fftResults by remember { mutableStateOf(floatArrayOf()) }
 
-    // Historia próbek i licznik czasu
+    // Sample history and time counter
     val dbHistory = remember { mutableStateListOf<Float>() }
     var totalSamples by remember { mutableLongStateOf(0L) }
     val maxHistorySize = 100
@@ -183,7 +183,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     }
 
                     dbHistory.add(currentDb)
-                    totalSamples++
+                    ++totalSamples
                     if (dbHistory.size > maxHistorySize) {
                         dbHistory.removeAt(0)
                     }
@@ -230,7 +230,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     thickness = DividerDefaults.Thickness,
                     color = DividerDefaults.color
                 )
-                AudioCanvas(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples, fftResults = fftResults)
+                AudioCanvasDB(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
             }
         }
     }
@@ -382,7 +382,7 @@ fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> U
 }
 
 @Composable
-fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long, fftResults: FloatArray = floatArrayOf())
+fun AudioCanvasDB(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long)
 {
     if(isRecording && dbHistory.isNotEmpty())
     {
@@ -412,7 +412,7 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
             val minDb = -100f
             val maxDb = 0f
 
-            // --- PODZIAŁKA Y (dB) ---
+            // --- Y AXIS (RELATIVE SOUND LEVEL) ---
             for (db in -100..0 step 20) {
                 val y = graphHeight - ((db - minDb) / (maxDb - minDb) * graphHeight)
                 drawLine(
@@ -429,7 +429,7 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
                 )
             }
 
-            // --- PODZIAŁKA X (Czas) ---
+            // --- X AXIS (TIME) ---
             val firstSampleIndex = totalSamples - dbHistory.size
             for (i in 0 until dbHistory.size) {
                 val absoluteIndex = firstSampleIndex + i
@@ -452,7 +452,7 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
                 }
             }
 
-            // --- WYKRES ---
+            // --- FIGURE ---
             for (i in 0 until dbHistory.size - 1) {
                 val startX = leftMargin + (i * dx)
                 val startY = graphHeight - ((dbHistory[i] - minDb) / (maxDb - minDb) * graphHeight)
@@ -468,7 +468,7 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
                 )
             }
 
-            // Osie
+            // Axis lines
             drawLine(textStyle.color, Offset(leftMargin, 0f), Offset(leftMargin, graphHeight), 2f)
             drawLine(textStyle.color, Offset(leftMargin, graphHeight), Offset(size.width, graphHeight), 2f)
         }
