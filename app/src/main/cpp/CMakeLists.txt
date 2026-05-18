@@ -8,9 +8,11 @@ find_package(oboe REQUIRED CONFIG)
 # Create your library
 add_library(native-audio-lib SHARED
         native-lib.cpp
+        AudioEngine.cpp
         DSPmodule.cpp)
 
 # Link your library to Oboe and the Android Logging library
 target_link_libraries(native-audio-lib
         oboe::oboe
-        log)
+        log
+        atomic)

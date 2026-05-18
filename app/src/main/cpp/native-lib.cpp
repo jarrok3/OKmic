@@ -1,118 +1,66 @@
 #include <jni.h>
-#include <oboe/Oboe.h>
-#include <android/log.h>
-#include <atomic>
-#include <cmath>
-#include <mutex>
-#include "DSPmodule.h"
+#include "AudioEngine.h"
 
-#define TAG "AudioEngine"
+// Single engine instance, disallowed copying
+static std::unique_ptr<AudioEngine> gEngine;
 
-class AudioEngine : public oboe::AudioStreamDataCallback {
-private:
-    std::shared_ptr<oboe::AudioStream> mStream;
-    std::mutex mLock;
-    DSPmodule dspProcessor;
-
-public:
-    AudioEngine() = default;
-    ~AudioEngine() {
-        stop();
-    }
-
-    float getLoudestDb() const {
-        return dspProcessor.getMaxDB();
-    }
-
-    float getCurrentDb() const {
-        return dspProcessor.getCurrentDB();
-    }
-
-    float getLowestDb() const {
-        return dspProcessor.getMinDB();
-    }
-
-    // return true if correctly started streaming
-    bool start() {
-        std::lock_guard<std::mutex> lock(mLock);
-        if (mStream) return true;
-
-        oboe::AudioStreamBuilder builder;
-        builder.setDirection(oboe::Direction::Input)
-               ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-               ->setSharingMode(oboe::SharingMode::Exclusive)
-               ->setFormat(oboe::AudioFormat::Float)
-               ->setChannelCount(oboe::ChannelCount::Mono)
-               ->setDataCallback(this);
-
-        oboe::Result result = builder.openStream(mStream);
-        if (result != oboe::Result::OK) {
-            __android_log_print(ANDROID_LOG_ERROR, TAG, "Error opening stream: %s", oboe::convertToText(result));
-            return false;
-        }
-
-        result = mStream->requestStart();
-        if (result != oboe::Result::OK) {
-            __android_log_print(ANDROID_LOG_ERROR, TAG, "Error starting stream: %s", oboe::convertToText(result));
-            mStream->close();
-            mStream.reset();
-            return false;
-        }
-
-        __android_log_print(ANDROID_LOG_INFO, TAG, "Audio stream started successfully");
-        return true;
-    }
-
-    void stop() {
-        std::lock_guard<std::mutex> lock(mLock);
-        if (mStream) {
-            mStream->stop();
-            mStream->close();
-            mStream.reset();
-            dspProcessor.reset();
-            __android_log_print(ANDROID_LOG_INFO, TAG, "Audio stream stopped, DSP state reset");
-        }
-    }
-
-    // Get & process mic data
-    oboe::DataCallbackResult onAudioReady(oboe::AudioStream *audioStream, void *audioData, int32_t numFrames) override {
-        if (audioStream->getFormat() == oboe::AudioFormat::Float) {
-            auto *micData = static_cast<float *>(audioData);
-            dspProcessor.process(micData, numFrames);
-
-            // Now it's possible to retrieve all the data from DSP Getters
-
-        }
-        return oboe::DataCallbackResult::Continue;
-    }
-};
-
-// Singleton engine instance
-static AudioEngine gEngine;
-
+// JNI Integration
 extern "C" {
-    JNIEXPORT jboolean JNICALL
+    JNIEXPORT void JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_openAudio(JNIEnv *env, jobject thiz) {
+        if (!gEngine) {
+            gEngine = std::make_unique<AudioEngine>();
+        }
+        gEngine->openStream();
+    }
+
+    JNIEXPORT void JNICALL
     Java_com_example_soundproof_1okmic_MainActivity_startAudio(JNIEnv *env, jobject thiz) {
-        return static_cast<jboolean>(gEngine.start());
+        if (gEngine){
+            gEngine->startStream();
+        }
     }
 
     JNIEXPORT void JNICALL
     Java_com_example_soundproof_1okmic_MainActivity_stopAudio(JNIEnv *env, jobject thiz) {
-        gEngine.stop();
+        if (gEngine) {
+            gEngine->stopStream();
+        }
     }
 
-    JNIEXPORT jfloat JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getLoudestDb(JNIEnv *env, jobject thiz) {
-        return static_cast<jfloat>(gEngine.getLoudestDb());
+    JNIEXPORT void JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_setFWindowSize(JNIEnv *env, jobject thiz, jint fwindow_size) {
+        gEngine->setFWindowSize(fwindow_size);
     }
 
-    JNIEXPORT jfloat JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getLowestDb(JNIEnv *env, jobject thiz) {
-        return static_cast<jfloat>(gEngine.getLowestDb());
+    JNIEXPORT void JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_setBufferSize(JNIEnv *env, jobject thiz, jint buffer_size) {
+        gEngine->setBufferSize(buffer_size);
     }
 
-    JNIEXPORT jfloat JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getCurrentDb(JNIEnv *env, jobject thiz) {
-        return static_cast<jfloat>(gEngine.getCurrentDb());
+    JNIEXPORT jfloatArray JNICALL
+    Java_com_example_soundproof_1okmic_MainActivity_getAudioResults(JNIEnv *env, jobject thiz) {
+        if (!gEngine) return nullptr;
+
+        AudioResults results = gEngine->getLatestResults();
+
+        size_t fourierSize = results.fourierResults.size();
+        size_t totalSize = 3 + fourierSize; // currentDB, maxDB, minDB + fourierResults
+
+        jfloatArray resultArray = env->NewFloatArray((jsize)totalSize);
+        if (resultArray == nullptr) return nullptr;
+
+        auto* temp = new jfloat[totalSize];
+        temp[0] = (jfloat)results.currentDB;
+        temp[1] = (jfloat)results.maxDB;
+        temp[2] = (jfloat)results.minDB;
+        for (size_t i = 0; i < fourierSize; ++i) {
+            temp[3 + i] = (jfloat)results.fourierResults[i];
+        }
+
+        env->SetFloatArrayRegion(resultArray, 0, (jsize)totalSize, temp);
+        delete[] temp;
+
+        return resultArray;
     }
 }

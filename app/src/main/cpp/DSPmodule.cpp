@@ -8,78 +8,120 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-DSPmodule::DSPmodule() : currentDB(0.0f), maxDB(-100.0f), minDB(100.0f), window_size(1024), fftResults(512, -100.0f), curr_totalof_samples(0) {}
-
-float DSPmodule::getCurrentDB() const{
-    return currentDB;
+DSPmodule::DSPmodule() : currentDB(0.0f), maxDB(-100.0f), minDB(100.0f), ringBuffer(std::make_unique<LockFreeQueue<float>>(1024)), fwindowSize(1024), bufferSize(1024)
+{
+    isRunning = true;
+    processingThread = std::thread(&DSPmodule::_processingLoop, this);
 }
 
-float DSPmodule::getMaxDB() const{
-    return maxDB;
+DSPmodule::~DSPmodule() {
+    isRunning = false;
+    cv.notify_all();
+    if (processingThread.joinable()) {
+        processingThread.join();
+    }
 }
 
-float DSPmodule::getMinDB() const{
-    return minDB;
-}
-
-int DSPmodule::getWindowSize() const {
-    return window_size;
-}
-
-std::vector<float> DSPmodule::getFFTResults() const {
-    return fftResults;
-}
-
-void DSPmodule::setWindowSize(int size){
+void DSPmodule::setFWindowSize(int size){
     if (size <= 0 || (size & (size - 1)) != 0)
-        throw std::invalid_argument("Window size must be a positive power of 2");
-    window_size = size;
-    fftResults.assign(window_size / 2, -100.0f);
+        throw std::invalid_argument("DSP: Window size must be a positive power of 2");
+    fwindowSize = size;
 }
 
-void DSPmodule::reset() {
+void DSPmodule::setBufferSize(int size) {
+    if (size <= 0 || (size & (size - 1)) != 0)
+        throw std::invalid_argument("DSP: Buffer size must be a positive power of 2");
+    bufferSize = size;
+    _resetBuffer();
+}
+
+bool DSPmodule::_resetBuffer() {
+    ringBuffer = std::make_unique<LockFreeQueue<float>>(bufferSize);
+    return true;
+}
+
+bool DSPmodule::reset() {
     maxDB = -100.0f;
     minDB = 100.0f;
-    fftResults.assign(window_size / 2, -100.0f);
-    curr_totalof_samples = 0;
+    currentDB = 0.0f;
+    this->_resetBuffer();
+    return true;
 }
 
 void DSPmodule::process(const float* data, int numFrames){
-    float rms = _calcRMS(data, numFrames);
-    currentDB = 20.0f * log10f( std::fmax(rms, 1e-9f));
+    for (int i = 0; i < numFrames; ++i) {
+        ringBuffer->push(data[i]);
+    }
 
-    if (currentDB > maxDB)
-        maxDB = currentDB;
-    if (currentDB < minDB)
-        minDB = currentDB;
-
-    curr_totalof_samples += numFrames;
-    if(curr_totalof_samples >= getWindowSize()){
-        fftResults = _fourierTransform(data, curr_totalof_samples);
-        curr_totalof_samples = 0;
+    if(this->ringBuffer->size() == bufferSize)
+    {
+        cv.notify_one(); // wake random thread for internal processing
     }
 }
 
-float DSPmodule::_calcRMS(const float* data, int numFrames) const{
-    float quadratic_sum = 0.0f;
-    for(int i = 0; i<numFrames; i++){
-        quadratic_sum += data[i] * data[i];
+void DSPmodule::_processingLoop(){
+    std::vector<float> workingBuffer(bufferSize);
+
+    while (isRunning) {
+        std::unique_lock<std::mutex> lock(threadMutex);
+        cv.wait(lock, [this] { return !isRunning || ringBuffer->size() >= bufferSize; });
+
+        if (!isRunning) break;
+
+        for (int i = 0; i < bufferSize; ++i) {
+            ringBuffer->pop(workingBuffer[i]);
+        }
+        lock.unlock();
+
+        // Process
+        float rms = _calcRMS(workingBuffer);
+        currentDB = 20.0f * std::log10(std::max(rms, 1e-9f));
+
+        if (currentDB > maxDB) maxDB = currentDB;
+        if (currentDB < minDB) minDB = currentDB;
+
+        latestFourierResults = _fourierTransform(workingBuffer);
+
+        // Notify the engine, invoke event
+        AudioResults results = {
+                currentDB,
+                maxDB,
+                minDB,
+                latestFourierResults
+        };
+        if (listener != nullptr) {
+            listener->onAudioDataReady(results);
+        }
     }
-    return sqrt(quadratic_sum/numFrames);
 }
 
-std::vector<float> DSPmodule::_fourierTransform(const float* data, int numFrames) const {
-    int n = window_size;
+float DSPmodule::_calcRMS(std::vector<float>& workingBuffer) {
+    float sum = 0.0f;
+    for(int i = 0; i < workingBuffer.size(); ++i)
+    {
+        sum += workingBuffer[i] * workingBuffer[i];
+    }
+    return std::sqrt(sum / bufferSize);
+}
 
-    // Hann Windowing (antialiasing)
+std::vector<float> DSPmodule::_fourierTransform(std::vector<float>& workingBuffer) {
+    int n = fwindowSize;
+    int dataSize = static_cast<int>(workingBuffer.size());
+
+    // 1. Hann Windowing
+    for (int i = 0; i < std::min(n, dataSize); i++) {
+        float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (n - 1.0f)));
+        workingBuffer[i] *= window;
+    }
+
+    // 2. Prepare complex buffer for FFT
     std::vector<std::complex<float>> buffer(n);
     for (int i = 0; i < n; i++) {
-        float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (n - 1)));
-        float sample = (i < numFrames) ? data[i] : 0.0f;
-        buffer[i] = std::complex<float>(sample * window, 0.0f);
+        float sample = (i < dataSize) ? workingBuffer[i] : 0.0f;
+        buffer[i] = std::complex<float>(sample, 0.0f);
     }
 
-    // 2. FFT with Cooley-Tukey Radix-2 algorithm
+    // 3. FFT with Cooley-Tukey Radix-2 algorithm
     // Bit-reversal permutation
     for (int i = 1, j = 0; i < n; i++) {
         int bit = n >> 1;
@@ -104,7 +146,7 @@ std::vector<float> DSPmodule::_fourierTransform(const float* data, int numFrames
         }
     }
 
-    // 3. Relative sound level [dB]
+    // 4. Calculate Magnitude Spectrum and convert to Relative sound level [dB]
     std::vector<float> magnitudeSpectrum(n / 2);
     for (int i = 0; i < n / 2; i++) {
         float mag = std::abs(buffer[i]) / n; // normalization
@@ -113,3 +155,4 @@ std::vector<float> DSPmodule::_fourierTransform(const float* data, int numFrames
 
     return magnitudeSpectrum;
 }
+

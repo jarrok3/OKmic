@@ -45,17 +45,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -71,6 +70,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 
 fun Context.findActivity(): Activity? {
@@ -96,11 +96,11 @@ class MainActivity : ComponentActivity() {
     }
 
     // External functions for Audio handling
-    external fun startAudio(): Boolean
+    external fun openAudio()
+    external fun startAudio()
     external fun stopAudio()
-    external fun getLoudestDb(): Float
-    external fun getLowestDb(): Float
-    external fun getCurrentDb(): Float
+    external fun setBufferSize(bufferSize: Int)
+    external fun getAudioResults(): FloatArray?
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,6 +127,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onPause() {
+        super.onPause()
+        stopAudio()
+    }
 }
 
 // === MAIN LAYOUT ===
@@ -137,10 +142,11 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
     var loudestDb by remember { mutableFloatStateOf(0.0f) }
     var lowestDb by remember { mutableFloatStateOf(0.0f) }
     var currentDb by remember { mutableFloatStateOf(0.0f) }
+    var fftResults by remember { mutableStateOf(floatArrayOf()) }
 
-    // Historia próbek i licznik czasu
+    // Sample history and time counter
     val dbHistory = remember { mutableStateListOf<Float>() }
-    var totalSamples by remember { mutableStateOf(0L) }
+    var totalSamples by remember { mutableLongStateOf(0L) }
     val maxHistorySize = 100
 
     // Necessary check of permissions to record from mic
@@ -161,16 +167,23 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
         if (isRecording) {
             // Only if mic recording was allowed
             if (micChannelActivity?.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                micChannelActivity.openAudio()
                 micChannelActivity.startAudio()
                 dbHistory.clear()
                 totalSamples = 0L
                 while (isRecording) {
-                    loudestDb = micChannelActivity.getLoudestDb()
-                    lowestDb = micChannelActivity.getLowestDb()
-                    currentDb = micChannelActivity.getCurrentDb()
+                    val results = micChannelActivity.getAudioResults()
+                    if (results != null && results.size >= 3) {
+                        currentDb = results[0]
+                        loudestDb = results[1]
+                        lowestDb = results[2]
+                        if (results.size > 3) {
+                            fftResults = results.sliceArray(3 until results.size)
+                        }
+                    }
 
                     dbHistory.add(currentDb)
-                    totalSamples++
+                    ++totalSamples
                     if (dbHistory.size > maxHistorySize) {
                         dbHistory.removeAt(0)
                     }
@@ -217,7 +230,8 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     thickness = DividerDefaults.Thickness,
                     color = DividerDefaults.color
                 )
-                AudioCanvas(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
+                AudioCanvasDB(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
+                AudioCanvasFFT(isRecording = isRecording, fftResults = fftResults.toList())
             }
         }
     }
@@ -359,17 +373,10 @@ fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> U
             contentDescription = "Record_audio"
         )
     }
-
-    // The refresh event is processed by the ViewModel that is in charge
-    // of the UI's business logic.
-//        Button(onClick = { viewModel.refreshNews() }) {
-//            Text("Refresh data")
-//        }
-
 }
 
 @Composable
-fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long)
+fun AudioCanvasDB(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long)
 {
     if(isRecording && dbHistory.isNotEmpty())
     {
@@ -399,7 +406,7 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
             val minDb = -100f
             val maxDb = 0f
 
-            // --- PODZIAŁKA Y (dB) ---
+            // --- Y AXIS (RELATIVE SOUND LEVEL) ---
             for (db in -100..0 step 20) {
                 val y = graphHeight - ((db - minDb) / (maxDb - minDb) * graphHeight)
                 drawLine(
@@ -416,11 +423,11 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
                 )
             }
 
-            // --- PODZIAŁKA X (Czas) ---
+            // --- X AXIS (TIME) ---
             val firstSampleIndex = totalSamples - dbHistory.size
             for (i in 0 until dbHistory.size) {
                 val absoluteIndex = firstSampleIndex + i
-                if (absoluteIndex >= 0 && absoluteIndex % 20 == 0L) { // Co 2 sekundy (20 * 100ms)
+                if (absoluteIndex >= 0 && absoluteIndex % 20 == 0L) {
                     val x = leftMargin + (i * dx)
                     val timeSeconds = absoluteIndex / 10
                     
@@ -439,7 +446,7 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
                 }
             }
 
-            // --- WYKRES ---
+            // --- FIGURE ---
             for (i in 0 until dbHistory.size - 1) {
                 val startX = leftMargin + (i * dx)
                 val startY = graphHeight - ((dbHistory[i] - minDb) / (maxDb - minDb) * graphHeight)
@@ -455,13 +462,95 @@ fun AudioCanvas(isRecording: Boolean, dbHistory: List<Float>, totalSamples: Long
                 )
             }
 
-            // Osie
+            // Axis lines
             drawLine(textStyle.color, Offset(leftMargin, 0f), Offset(leftMargin, graphHeight), 2f)
             drawLine(textStyle.color, Offset(leftMargin, graphHeight), Offset(size.width, graphHeight), 2f)
         }
     }
 }
 
+@Composable
+fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
+{
+    if(isRecording && fftResults.isNotEmpty())
+    {
+        val strokeColor = MaterialTheme.colorScheme.primary
+        val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+        val textMeasurer = rememberTextMeasurer()
+        val textStyle = TextStyle(fontSize = MaterialTheme.typography.labelSmall.fontSize, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Canvas(
+            modifier = Modifier
+                .padding(0.dp)
+                .fillMaxWidth()
+                .height(400.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.background
+                )
+        )
+        {
+            val leftMargin = 50.dp.toPx()
+            val bottomMargin = 40.dp.toPx()
+            val graphWidth = size.width - leftMargin
+            val graphHeight = size.height - bottomMargin
+
+            val barWidth = graphWidth / fftResults.size
+
+            val minDb = -80f
+            val maxDb = -20f
+
+            // --- Y AXIS (RELATIVE SOUND LEVEL) ---
+            for (db in -100..0 step 20) {
+                val y = graphHeight - ((db - minDb) / (maxDb - minDb) * graphHeight)
+                drawLine(
+                    color = gridColor,
+                    start = Offset(leftMargin, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1f
+                )
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = "$db",
+                    style = textStyle,
+                    topLeft = Offset(5.dp.toPx(), y - 10.dp.toPx())
+                )
+            }
+
+            // --- X AXIS (FREQUENCY) ---
+            val labels = listOf("0", "5k", "10k", "15k", "20k")
+            labels.forEachIndexed { index, label ->
+                val x = leftMargin + (index.toFloat() / (labels.size - 1)) * graphWidth
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = label,
+                    style = textStyle,
+                    topLeft = Offset(x - 10.dp.toPx(), graphHeight + 5.dp.toPx())
+                )
+            }
+
+            // --- SPECTRUM BARS ---
+            for (i in fftResults.indices) {
+                val x = leftMargin + (i * barWidth)
+                val magnitude = fftResults[i]
+                val normalizedMag = ((magnitude - minDb) / (maxDb - minDb)).coerceIn(0f, 1f)
+                val barHeight = normalizedMag * graphHeight
+
+                drawRect(
+                    color = strokeColor,
+                    topLeft = Offset(x, graphHeight - barHeight),
+                    size = androidx.compose.ui.geometry.Size(
+                        width = barWidth.coerceAtLeast(1f),
+                        height = barHeight
+                    )
+                )
+            }
+
+            // Axis lines
+            drawLine(textStyle.color, Offset(leftMargin, 0f), Offset(leftMargin, graphHeight), 2f)
+            drawLine(textStyle.color, Offset(leftMargin, graphHeight), Offset(size.width, graphHeight), 2f)
+        }
+    }
+}
 
 // === MY CAPTURES LAYOUT ===
 @Composable
