@@ -108,6 +108,12 @@ data object InScreenOffset{
     val y = (-12).dp
 }
 
+// VIEWMODEL FOR STORING CONFIGURATION SETTINGS
+// Onaudiostart should read from these to create the AudioStream with specified parameters
+class ConfigurationSettings{
+
+}
+
 class MainActivity : ComponentActivity() {
     // External OBOE lib inclusion
     companion object {
