@@ -2,17 +2,16 @@ package com.example.soundproof_okmic
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
-import android.graphics.drawable.Icon
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,7 +35,6 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
@@ -90,10 +88,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.selects.select
 import kotlinx.serialization.Serializable
-import kotlin.math.exp
 
+// Context for getting current activity
 fun Context.findActivity(): Activity? {
     var context = this
     while (context is ContextWrapper) {
@@ -103,18 +100,16 @@ fun Context.findActivity(): Activity? {
     return null
 }
 
+// For unified UI adjustments
 data object InScreenOffset{
     val x = (-12).dp
     val y = (-12).dp
 }
 
-// VIEWMODEL FOR STORING CONFIGURATION SETTINGS
-// Onaudiostart should read from these to create the AudioStream with specified parameters
-class ConfigurationSettings{
-
-}
-
 class MainActivity : ComponentActivity() {
+    // declare config viewmodel to outlive the current activity
+    private val configSettings by viewModels<ConfigurationSettings>()
+
     // External OBOE lib inclusion
     companion object {
         init {
