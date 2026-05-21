@@ -61,7 +61,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +77,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -659,16 +660,18 @@ fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
 // === SETTINGS DIALOG MENU ===
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
+fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, configSettings: ConfigurationSettings = viewModel())
 {
-    var enableNoiseGate by remember{ mutableStateOf(false) }
-    var sliderPosition by remember { mutableFloatStateOf(0f) }
+    // Get viewModel state
+    val currentConfigState by configSettings.configData.collectAsStateWithLifecycle()
+
+    // For connecting UI updates to viewModel changes
+    var sliderPosition by remember { mutableFloatStateOf(currentConfigState.noiseGateThreshold) }
+
+    // Dropdown Menus controls
     var expandedBufferMenu by remember { mutableStateOf(false) }
-    var selectedBufferSize by remember { mutableIntStateOf(1024) }
     var expandedWindowMenu by remember { mutableStateOf(false) }
-    var selectedWindowSize by remember { mutableIntStateOf(1024) }
     var expandedAlgoMenu by remember { mutableStateOf(false) }
-    var selectedAlgo by remember { mutableStateOf("Hann") }
 
     BasicAlertDialog(
         onDismissRequest = onDismiss,
@@ -689,22 +692,26 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
             )
             {
                 Text(
-                    text = "Remember to apply your changes before leaving this window"
+                    text = "Remember to apply your changes for them to take effect!"
                 )
 
                 // NOISE GATE
                 Text(text = "Enable Noise Gate")
                 Checkbox(
-                    checked = enableNoiseGate,
-                    onCheckedChange = {enableNoiseGate = it}
+                    checked = currentConfigState.noiseGateEnabled,
+                    onCheckedChange = { configSettings.setNoiseGateEnabled(it) }
                 )
-                if(enableNoiseGate)
+                if(currentConfigState.noiseGateEnabled)
                 {
                     Slider(
-                        value = sliderPosition,
-                        onValueChange = { sliderPosition = it },
+                        value = currentConfigState.noiseGateThreshold,
+                        onValueChange = { newValue ->
+                            configSettings.setNoiseGateThreshold(newValue)
+                            sliderPosition = newValue
+                        },
                         valueRange = -80f..0f
                     )
+                    Text("$sliderPosition dB")
                 }
 
                 // BUFFER SIZE
@@ -722,7 +729,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text("$selectedBufferSize")
+                            Text("${currentConfigState.bufferSize}")
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
                         }
 
@@ -732,28 +739,30 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                         ){
                             DropdownMenuItem(
                                 text = { Text("512") },
-                                onClick = { selectedBufferSize = 512; expandedBufferMenu = false }
+                                onClick = { configSettings.setBufferSize(512); expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("1024") },
-                                onClick = { selectedBufferSize = 1024; expandedBufferMenu = false }
+                                onClick = { configSettings.setBufferSize(1024) ; expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("2048") },
-                                onClick = { selectedBufferSize = 2048; expandedBufferMenu = false }
+                                onClick = { configSettings.setBufferSize(2048) ; expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("4096") },
-                                onClick = { selectedBufferSize = 4096; expandedBufferMenu = false }
+                                onClick = { configSettings.setBufferSize(4096) ; expandedBufferMenu = false }
                             )
                         }
                     }
                 }
 
                 // WINDOW SIZE
-                if(selectedBufferSize<selectedWindowSize)
+                LaunchedEffect(currentConfigState.bufferSize)
                 {
-                    selectedWindowSize = selectedBufferSize
+                    if (currentConfigState.bufferSize < currentConfigState.fWindowSize) {
+                        configSettings.setFWindowSize(currentConfigState.bufferSize)
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -769,7 +778,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text("$selectedWindowSize")
+                            Text("${currentConfigState.fWindowSize}")
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
                         }
 
@@ -779,24 +788,24 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                         ){
                             DropdownMenuItem(
                                 text = { Text("512") },
-                                onClick = { selectedWindowSize = 512; expandedWindowMenu = false }
+                                onClick = { configSettings.setFWindowSize(512); expandedWindowMenu = false }
                             )
-                            if(selectedBufferSize>=1024){
+                            if(currentConfigState.bufferSize >= 1024){
                                 DropdownMenuItem(
                                     text = { Text("1024") },
-                                    onClick = { selectedWindowSize = 1024; expandedWindowMenu = false }
+                                    onClick = { configSettings.setFWindowSize(1024); expandedWindowMenu = false }
                                 )
                             }
-                            if(selectedBufferSize>=2048) {
+                            if(currentConfigState.bufferSize >= 2048) {
                                 DropdownMenuItem(
                                     text = { Text("2048") },
-                                    onClick = { selectedWindowSize = 2048; expandedWindowMenu = false }
+                                    onClick = { configSettings.setFWindowSize(2048); expandedWindowMenu = false }
                                 )
                             }
-                            if(selectedBufferSize>=4096) {
+                            if(currentConfigState.bufferSize >= 4096) {
                                 DropdownMenuItem(
                                     text = { Text("4096") },
-                                    onClick = { selectedWindowSize = 4096; expandedWindowMenu = false }
+                                    onClick = { configSettings.setFWindowSize(4096); expandedWindowMenu = false }
                                 )
                             }
                         }
@@ -820,7 +829,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(selectedAlgo)
+                            Text(currentConfigState.algo)
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
                         }
 
@@ -830,15 +839,15 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier)
                         ){
                             DropdownMenuItem(
                                 text = { Text("Hann") },
-                                onClick = { selectedAlgo = "Hann"; expandedAlgoMenu = false }
+                                onClick = { configSettings.setAlgo("Hann"); expandedAlgoMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Hamming") },
-                                onClick = { selectedAlgo = "Hamming"; expandedAlgoMenu = false }
+                                onClick = { configSettings.setAlgo("Hamming"); expandedAlgoMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Blackman") },
-                                onClick = { selectedAlgo = "Blackman"; expandedAlgoMenu = false }
+                                onClick = { configSettings.setAlgo("Blackman"); expandedAlgoMenu = false }
                             )
                         }
                     }
