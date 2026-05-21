@@ -706,10 +706,10 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                 }
 
                 // WINDOW SIZE
-                LaunchedEffect(currentConfigState.bufferSize)
+                LaunchedEffect(bufferSize)
                 {
-                    if (currentConfigState.bufferSize < currentConfigState.fWindowSize) {
-                        audioManager.changeFWindowSize(currentConfigState.bufferSize)
+                    if (bufferSize < fWindowSize) {
+                        fWindowSize = bufferSize
                     }
                 }
                 Row(
@@ -738,19 +738,19 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                                 text = { Text("512") },
                                 onClick = { fWindowSize = 512; expandedWindowMenu = false }
                             )
-                            if(currentConfigState.bufferSize >= 1024){
+                            if(bufferSize >= 1024){
                                 DropdownMenuItem(
                                     text = { Text("1024") },
                                     onClick = { fWindowSize = 1024; expandedWindowMenu = false }
                                 )
                             }
-                            if(currentConfigState.bufferSize >= 2048) {
+                            if(bufferSize >= 2048) {
                                 DropdownMenuItem(
                                     text = { Text("2048") },
                                     onClick = { fWindowSize= 2048; expandedWindowMenu = false }
                                 )
                             }
-                            if(currentConfigState.bufferSize >= 4096) {
+                            if(bufferSize >= 4096) {
                                 DropdownMenuItem(
                                     text = { Text("4096") },
                                     onClick = { fWindowSize = 4096; expandedWindowMenu = false }
