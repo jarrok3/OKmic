@@ -88,12 +88,13 @@ void AudioEngine::setBufferSize(int bs) {
     if(bs < 0 || (bs & (bs-1)) != 0)
         throw std::invalid_argument("AudioEngine: Tried assigning wrong value to Fourier Window Size");
 
-    if (mStream->getState() == oboe::StreamState::Started){
-        stopStream();
-        this->dspProcessor->setBufferSize(bs);
-    } else {
-        this->dspProcessor->setBufferSize(bs);
-    }
+//    if (mStream->getState() == oboe::StreamState::Started){
+//        stopStream();
+//        this->dspProcessor->setBufferSize(bs);
+//    } else {
+//        this->dspProcessor->setBufferSize(bs);
+//    }
+    this->dspProcessor->setBufferSize(bs);
 }
 
 // Get & process mic data

@@ -7,7 +7,7 @@ static std::unique_ptr<AudioEngine> gEngine;
 // JNI Integration
 extern "C" {
     JNIEXPORT void JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_openAudio(JNIEnv *env, jobject thiz) {
+    Java_com_example_soundproof_1okmic_AudioManager_openAudio(JNIEnv *env, jobject thiz) {
         if (!gEngine) {
             gEngine = std::make_unique<AudioEngine>();
         }
@@ -15,31 +15,31 @@ extern "C" {
     }
 
     JNIEXPORT void JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_startAudio(JNIEnv *env, jobject thiz) {
+    Java_com_example_soundproof_1okmic_AudioManager_startAudio(JNIEnv *env, jobject thiz) {
         if (gEngine){
             gEngine->startStream();
         }
     }
 
     JNIEXPORT void JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_stopAudio(JNIEnv *env, jobject thiz) {
+    Java_com_example_soundproof_1okmic_AudioManager_stopAudio(JNIEnv *env, jobject thiz) {
         if (gEngine) {
             gEngine->stopStream();
         }
     }
 
     JNIEXPORT void JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_setFWindowSize(JNIEnv *env, jobject thiz, jint fwindow_size) {
+    Java_com_example_soundproof_1okmic_AudioManager_setFWindowSize(JNIEnv *env, jobject thiz, jint fwindow_size) {
         gEngine->setFWindowSize(fwindow_size);
     }
 
     JNIEXPORT void JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_setBufferSize(JNIEnv *env, jobject thiz, jint buffer_size) {
+    Java_com_example_soundproof_1okmic_AudioManager_setBufferSize(JNIEnv *env, jobject thiz, jint buffer_size) {
         gEngine->setBufferSize(buffer_size);
     }
 
     JNIEXPORT jfloatArray JNICALL
-    Java_com_example_soundproof_1okmic_MainActivity_getAudioResults(JNIEnv *env, jobject thiz) {
+    Java_com_example_soundproof_1okmic_AudioManager_getAudioResults(JNIEnv *env, jobject thiz) {
         if (!gEngine) return nullptr;
 
         AudioResults results = gEngine->getLatestResults();

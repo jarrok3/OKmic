@@ -57,10 +57,12 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -77,6 +79,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -108,23 +111,8 @@ data object InScreenOffset{
 }
 
 class MainActivity : ComponentActivity() {
-    // declare config viewmodel to outlive the current activity
-    private val configSettings by viewModels<ConfigurationSettings>()
-
-    // External OBOE lib inclusion
-    companion object {
-        init {
-            System.loadLibrary("native-audio-lib")
-        }
-    }
-
-    // External functions for Audio handling
-    external fun openAudio()
-    external fun startAudio()
-    external fun stopAudio()
-    external fun setBufferSize(bufferSize: Int)
-    external fun setFWindowSize(fwindowSize: Int)
-    external fun getAudioResults(): FloatArray?
+    // declare audioManager object to outlive the current activity
+    private val audioManager by viewModels<AudioManager>()
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -154,71 +142,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        stopAudio()
+        audioManager.stopRecording()
     }
 }
 
 // === MAIN LAYOUT ===
 @Composable
-fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
+fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audioManager: AudioManager = viewModel())
 {
-    var isRecording by remember { mutableStateOf(false) }
-    var loudestDb by remember { mutableFloatStateOf(0.0f) }
-    var lowestDb by remember { mutableFloatStateOf(0.0f) }
-    var currentDb by remember { mutableFloatStateOf(0.0f) }
-    var fftResults by remember { mutableStateOf(floatArrayOf()) }
+    val audioStream by audioManager.audioStream.collectAsStateWithLifecycle()
 
-    // Sample history and time counter
-    val dbHistory = remember { mutableStateListOf<Float>() }
-    var totalSamples by remember { mutableLongStateOf(0L) }
-    val maxHistorySize = 100
-
-    // Necessary check of permissions to record from mic
+    val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (!isGranted) {
-            isRecording = false
+        if (isGranted) {
+            audioManager.startRecording()
+        } else {
+            audioManager.changeRecordingState(false)
         }
     }
 
-    val context = LocalContext.current
-    val micChannelActivity = remember(context) {
-        context.findActivity() as? MainActivity
-    }
+    LaunchedEffect(audioStream.isRecording) {
+        if (audioStream.isRecording) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
 
-    LaunchedEffect(isRecording && micChannelActivity != null) {
-        if (isRecording) {
-            // Only if mic recording was allowed
-            if (micChannelActivity?.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                micChannelActivity.openAudio()
-                micChannelActivity.startAudio()
-                dbHistory.clear()
-                totalSamples = 0L
-                while (isRecording) {
-                    val results = micChannelActivity.getAudioResults()
-                    if (results != null && results.size >= 3) {
-                        currentDb = results[0]
-                        loudestDb = results[1]
-                        lowestDb = results[2]
-                        if (results.size > 3) {
-                            fftResults = results.sliceArray(3 until results.size)
-                        }
-                    }
-
-                    dbHistory.add(currentDb)
-                    ++totalSamples
-                    if (dbHistory.size > maxHistorySize) {
-                        dbHistory.removeAt(0)
-                    }
-
-                    delay(100) // Update UI every 100ms
-                }
+            if (hasPermission) {
+                audioManager.startRecording()
             } else {
                 permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         } else {
-            micChannelActivity?.stopAudio()
+            audioManager.stopRecording()
         }
     }
 
@@ -226,7 +184,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
         modifier = modifier,
         topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
-        floatingActionButton = { FloatingRecordButton(isRecording = isRecording, onRecordingChange = { isRecording = it }) }
+        floatingActionButton = { FloatingRecordButton(onRecordingChange = { audioManager.changeRecordingState(it) }) }
     ) { innerPadding ->
         BoxWithConstraints(
             modifier = Modifier
@@ -244,9 +202,9 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                 horizontalAlignment = Alignment.Start
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Current: $currentDb [dB]")
-                Text("Loudest: $loudestDb [dB]")
-                Text("Lowest: $lowestDb [dB]")
+                Text("Current: ${audioStream.currentDb} [dB]")
+                Text("Loudest: ${audioStream.maxDb} [dB]")
+                Text("Lowest: ${audioStream.minDb} [dB]")
                 HorizontalDivider(
                     modifier = Modifier
                         .padding(vertical = 16.dp)
@@ -254,8 +212,8 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     thickness = DividerDefaults.Thickness,
                     color = DividerDefaults.color
                 )
-                AudioCanvasDB(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
-                AudioCanvasFFT(isRecording = isRecording, fftResults = fftResults.toList())
+                AudioCanvasDB(isRecording = audioStream.isRecording, dbHistory = audioStream.dbHistory, totalSamples = audioStream.totalSamples)
+                AudioCanvasFFT(isRecording = audioStream.isRecording, fftResults = audioStream.fourierResults.toList())
             }
         }
     }
@@ -421,19 +379,20 @@ fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
 }
 
 @Composable
-fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> Unit)
+fun FloatingRecordButton(onRecordingChange: (Boolean) -> Unit, audioState: AudioManager = viewModel())
 {
+    val currentAudioStreamState by audioState.audioStream.collectAsStateWithLifecycle()
 
     Button(
         elevation = ButtonDefaults.elevatedButtonElevation(
             defaultElevation = 8.dp
         ),
         shape = ButtonDefaults.shape,
-        onClick = { onRecordingChange(!isRecording) },
+        onClick = { onRecordingChange(!currentAudioStreamState.isRecording) },
         modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
     ) {
         Text(
-            text = "REC "
+            text = if (currentAudioStreamState.isRecording) "STOP " else "REC "
         )
         Icon(
             imageVector = Icons.Rounded.FiberSmartRecord,
@@ -660,13 +619,17 @@ fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
 // === SETTINGS DIALOG MENU ===
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, configSettings: ConfigurationSettings = viewModel())
+fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, audioManager: AudioManager = viewModel())
 {
-    // Get viewModel state
-    val currentConfigState by configSettings.configData.collectAsStateWithLifecycle()
+    // Get viewModel configSettings
+    val currentConfigState by audioManager.configData.collectAsStateWithLifecycle()
 
     // For connecting UI updates to viewModel changes
-    var sliderPosition by remember { mutableFloatStateOf(currentConfigState.noiseGateThreshold) }
+    var sliderPosition: Float by remember { mutableFloatStateOf(currentConfigState.noiseGateThreshold) }
+    var isGateEnabled: Boolean by remember { mutableStateOf(currentConfigState.noiseGateEnabled) }
+    var algo: String by remember { mutableStateOf(currentConfigState.algo) }
+    var fWindowSize: Int by remember { mutableIntStateOf(currentConfigState.fWindowSize) }
+    var bufferSize: Int by remember { mutableIntStateOf(currentConfigState.bufferSize) }
 
     // Dropdown Menus controls
     var expandedBufferMenu by remember { mutableStateOf(false) }
@@ -698,15 +661,14 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                 // NOISE GATE
                 Text(text = "Enable Noise Gate")
                 Checkbox(
-                    checked = currentConfigState.noiseGateEnabled,
-                    onCheckedChange = { configSettings.setNoiseGateEnabled(it) }
+                    checked = isGateEnabled,
+                    onCheckedChange = {isGateEnabled = it}
                 )
-                if(currentConfigState.noiseGateEnabled)
+                if(isGateEnabled)
                 {
                     Slider(
                         value = currentConfigState.noiseGateThreshold,
                         onValueChange = { newValue ->
-                            configSettings.setNoiseGateThreshold(newValue)
                             sliderPosition = newValue
                         },
                         valueRange = -80f..0f
@@ -739,19 +701,19 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                         ){
                             DropdownMenuItem(
                                 text = { Text("512") },
-                                onClick = { configSettings.setBufferSize(512); expandedBufferMenu = false }
+                                onClick = { audioManager.changeBufferSize(512); expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("1024") },
-                                onClick = { configSettings.setBufferSize(1024) ; expandedBufferMenu = false }
+                                onClick = { audioManager.changeBufferSize(1024) ; expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("2048") },
-                                onClick = { configSettings.setBufferSize(2048) ; expandedBufferMenu = false }
+                                onClick = { audioManager.changeBufferSize(2048) ; expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("4096") },
-                                onClick = { configSettings.setBufferSize(4096) ; expandedBufferMenu = false }
+                                onClick = { audioManager.changeBufferSize(4096) ; expandedBufferMenu = false }
                             )
                         }
                     }
@@ -761,7 +723,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                 LaunchedEffect(currentConfigState.bufferSize)
                 {
                     if (currentConfigState.bufferSize < currentConfigState.fWindowSize) {
-                        configSettings.setFWindowSize(currentConfigState.bufferSize)
+                        audioManager.changeFWindowSize(currentConfigState.bufferSize)
                     }
                 }
                 Row(
@@ -788,24 +750,24 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                         ){
                             DropdownMenuItem(
                                 text = { Text("512") },
-                                onClick = { configSettings.setFWindowSize(512); expandedWindowMenu = false }
+                                onClick = { audioManager.changeFWindowSize(512); expandedWindowMenu = false }
                             )
                             if(currentConfigState.bufferSize >= 1024){
                                 DropdownMenuItem(
                                     text = { Text("1024") },
-                                    onClick = { configSettings.setFWindowSize(1024); expandedWindowMenu = false }
+                                    onClick = { audioManager.changeFWindowSize(1024); expandedWindowMenu = false }
                                 )
                             }
                             if(currentConfigState.bufferSize >= 2048) {
                                 DropdownMenuItem(
                                     text = { Text("2048") },
-                                    onClick = { configSettings.setFWindowSize(2048); expandedWindowMenu = false }
+                                    onClick = { audioManager.changeFWindowSize(2048); expandedWindowMenu = false }
                                 )
                             }
                             if(currentConfigState.bufferSize >= 4096) {
                                 DropdownMenuItem(
                                     text = { Text("4096") },
-                                    onClick = { configSettings.setFWindowSize(4096); expandedWindowMenu = false }
+                                    onClick = { audioManager.changeFWindowSize(4096); expandedWindowMenu = false }
                                 )
                             }
                         }
@@ -839,15 +801,15 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                         ){
                             DropdownMenuItem(
                                 text = { Text("Hann") },
-                                onClick = { configSettings.setAlgo("Hann"); expandedAlgoMenu = false }
+                                onClick = { audioManager.setAlgo("Hann"); expandedAlgoMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Hamming") },
-                                onClick = { configSettings.setAlgo("Hamming"); expandedAlgoMenu = false }
+                                onClick = { audioManager.setAlgo("Hamming"); expandedAlgoMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Blackman") },
-                                onClick = { configSettings.setAlgo("Blackman"); expandedAlgoMenu = false }
+                                onClick = { audioManager.setAlgo("Blackman"); expandedAlgoMenu = false }
                             )
                         }
                     }
@@ -858,6 +820,11 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
+                        audioManager.setNoiseGateEnabled(isGateEnabled)
+                        audioManager.setNoiseGateThreshold(sliderPosition)
+                        audioManager.changeBufferSize(bufferSize)
+                        audioManager.changeFWindowSize(fWindowSize)
+                        audioManager.setAlgo(algo)
                         onDismiss()
                     }
                 ) {
