@@ -57,14 +57,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -91,18 +88,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
-import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
-
-// Context for getting current activity
-fun Context.findActivity(): Activity? {
-    var context = this
-    while (context is ContextWrapper) {
-        if (context is Activity) return context
-        context = context.baseContext
-    }
-    return null
-}
 
 // For unified UI adjustments
 data object InScreenOffset{
@@ -667,7 +653,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                 if(isGateEnabled)
                 {
                     Slider(
-                        value = currentConfigState.noiseGateThreshold,
+                        value = sliderPosition,
                         onValueChange = { newValue ->
                             sliderPosition = newValue
                         },
@@ -691,7 +677,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text("${currentConfigState.bufferSize}")
+                            Text("$bufferSize")
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
                         }
 
@@ -701,19 +687,19 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                         ){
                             DropdownMenuItem(
                                 text = { Text("512") },
-                                onClick = { audioManager.changeBufferSize(512); expandedBufferMenu = false }
+                                onClick = { bufferSize = 512; expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("1024") },
-                                onClick = { audioManager.changeBufferSize(1024) ; expandedBufferMenu = false }
+                                onClick = { bufferSize = 1024; expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("2048") },
-                                onClick = { audioManager.changeBufferSize(2048) ; expandedBufferMenu = false }
+                                onClick = { bufferSize = 2048; expandedBufferMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("4096") },
-                                onClick = { audioManager.changeBufferSize(4096) ; expandedBufferMenu = false }
+                                onClick = { bufferSize = 4096; expandedBufferMenu = false }
                             )
                         }
                     }
@@ -740,7 +726,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text("${currentConfigState.fWindowSize}")
+                            Text("$fWindowSize")
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
                         }
 
@@ -750,24 +736,24 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                         ){
                             DropdownMenuItem(
                                 text = { Text("512") },
-                                onClick = { audioManager.changeFWindowSize(512); expandedWindowMenu = false }
+                                onClick = { fWindowSize = 512; expandedWindowMenu = false }
                             )
                             if(currentConfigState.bufferSize >= 1024){
                                 DropdownMenuItem(
                                     text = { Text("1024") },
-                                    onClick = { audioManager.changeFWindowSize(1024); expandedWindowMenu = false }
+                                    onClick = { fWindowSize = 1024; expandedWindowMenu = false }
                                 )
                             }
                             if(currentConfigState.bufferSize >= 2048) {
                                 DropdownMenuItem(
                                     text = { Text("2048") },
-                                    onClick = { audioManager.changeFWindowSize(2048); expandedWindowMenu = false }
+                                    onClick = { fWindowSize= 2048; expandedWindowMenu = false }
                                 )
                             }
                             if(currentConfigState.bufferSize >= 4096) {
                                 DropdownMenuItem(
                                     text = { Text("4096") },
-                                    onClick = { audioManager.changeFWindowSize(4096); expandedWindowMenu = false }
+                                    onClick = { fWindowSize = 4096; expandedWindowMenu = false }
                                 )
                             }
                         }
@@ -791,7 +777,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(currentConfigState.algo)
+                            Text(algo)
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
                         }
 
@@ -801,15 +787,15 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                         ){
                             DropdownMenuItem(
                                 text = { Text("Hann") },
-                                onClick = { audioManager.setAlgo("Hann"); expandedAlgoMenu = false }
+                                onClick = { algo = "Hann"; expandedAlgoMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Hamming") },
-                                onClick = { audioManager.setAlgo("Hamming"); expandedAlgoMenu = false }
+                                onClick = { algo = "Hamming"; expandedAlgoMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Blackman") },
-                                onClick = { audioManager.setAlgo("Blackman"); expandedAlgoMenu = false }
+                                onClick = { algo = "Blackman"; expandedAlgoMenu = false }
                             )
                         }
                     }

@@ -43,6 +43,8 @@ data class AudioStream(
         if (maxDb != other.maxDb) return false
         if (minDb != other.minDb) return false
         if (!fourierResults.contentEquals(other.fourierResults)) return false
+        if (dbHistory != other.dbHistory) return false
+        if (totalSamples != other.totalSamples) return false
 
         return true
     }
@@ -53,6 +55,8 @@ data class AudioStream(
         result = 31 * result + maxDb.hashCode()
         result = 31 * result + minDb.hashCode()
         result = 31 * result + fourierResults.contentHashCode()
+        result = 31 * result + dbHistory.hashCode()
+        result = 31 * result + totalSamples.hashCode()
         return result
     }
 }
@@ -130,6 +134,19 @@ class AudioManager : ViewModel() {
         recordingJob?.cancel()
         stopAudio()
         _audioStream.update { it.copy(isRecording = false) }
+        reset()
+    }
+
+    fun reset(){
+        _audioStream.update { it.copy(
+            isRecording = false,
+            currentDb = 0.0f,
+            maxDb = 0.0f,
+            minDb = 0.0f,
+            fourierResults = floatArrayOf(),
+            dbHistory = emptyList(),
+            totalSamples = 0L
+        ) }
     }
 
     fun updateAudioResults() {
