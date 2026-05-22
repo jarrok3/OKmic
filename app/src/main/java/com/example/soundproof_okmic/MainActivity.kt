@@ -79,6 +79,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.log10
+import kotlin.math.max
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -506,10 +508,16 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
             val graphWidth = size.width - leftMargin
             val graphHeight = size.height - bottomMargin
 
-            val barWidth = graphWidth / fftResults.size
-
             val minDb = -80f
             val maxDb = -20f
+
+            val sampleRate = 48000f
+            val nyquist = sampleRate / 2
+            val minFreq = 20f
+            val maxFreq = nyquist
+            
+            val logMin = log10(minFreq)
+            val logMax = log10(maxFreq)
 
             // --- Y AXIS (RELATIVE SOUND LEVEL) ---
             for (db in -100..0 step 20) {
@@ -528,30 +536,46 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
                 )
             }
 
-            // --- X AXIS (FREQUENCY) ---
-            val labels = listOf("0", "5k", "10k", "15k", "20k")
-            labels.forEachIndexed { index, label ->
-                val x = leftMargin + (index.toFloat() / (labels.size - 1)) * graphWidth
-                drawText(
-                    textMeasurer = textMeasurer,
-                    text = label,
-                    style = textStyle,
-                    topLeft = Offset(x - 10.dp.toPx(), graphHeight + 5.dp.toPx())
-                )
+            // --- X AXIS (FREQUENCY) LOGARITHMIC ---
+            val labels = mapOf(20f to "20", 100f to "100", 1000f to "1k", 5000f to "5k", 10000f to "10k", 20000f to "20k")
+            labels.forEach { (freq, label) ->
+                val x = leftMargin + ((log10(freq) - logMin) / (logMax - logMin)) * graphWidth
+                if (x >= leftMargin) {
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(x, 0f),
+                        end = Offset(x, graphHeight),
+                        strokeWidth = 1f
+                    )
+                    drawText(
+                        textMeasurer = textMeasurer,
+                        text = label,
+                        style = textStyle,
+                        topLeft = Offset(x - 10.dp.toPx(), graphHeight + 5.dp.toPx())
+                    )
+                }
             }
 
             // --- SPECTRUM BARS ---
-            for (i in fftResults.indices) {
-                val x = leftMargin + (i * barWidth)
+            val numBins = fftResults.size
+            for (i in 0 until numBins) {
+                val freqStart = (i.toFloat() / numBins) * nyquist
+                val freqEnd = ((i + 1).toFloat() / numBins) * nyquist
+                
+                if (freqEnd < minFreq) continue
+                
+                val xStart = leftMargin + ((log10(max(minFreq, freqStart)) - logMin) / (logMax - logMin)) * graphWidth
+                val xEnd = leftMargin + ((log10(freqEnd) - logMin) / (logMax - logMin)) * graphWidth
+                
                 val magnitude = fftResults[i]
                 val normalizedMag = ((magnitude - minDb) / (maxDb - minDb)).coerceIn(0f, 1f)
                 val barHeight = normalizedMag * graphHeight
 
                 drawRect(
                     color = strokeColor,
-                    topLeft = Offset(x, graphHeight - barHeight),
+                    topLeft = Offset(xStart, graphHeight - barHeight),
                     size = Size(
-                        width = barWidth.coerceAtLeast(1f),
+                        width = (xEnd - xStart).coerceAtLeast(1f),
                         height = barHeight
                     )
                 )
