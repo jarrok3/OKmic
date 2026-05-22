@@ -1,9 +1,6 @@
 package com.example.soundproof_okmic
 
 import android.Manifest
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,7 +12,6 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,7 +44,6 @@ import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -83,8 +78,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlin.math.log10
-import kotlin.math.max
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -94,7 +87,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.serialization.Serializable
+import kotlin.math.log10
+import kotlin.math.max
 
 // For unified UI adjustments
 data object InScreenOffset{
@@ -145,10 +143,16 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
     val audioStream by audioManager.audioStream.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val isAudioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
+        val isFineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val isCoarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+        if (isAudioGranted && (isFineLocationGranted || isCoarseLocationGranted)) {
             audioManager.startRecording()
         } else {
             audioManager.changeRecordingState(false)
@@ -157,18 +161,51 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
 
     LaunchedEffect(audioStream.isRecording) {
         if (audioStream.isRecording) {
-            val hasPermission = ContextCompat.checkSelfPermission(
+            val hasAudioPermission = ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
+            val hasFineLocationPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasCoarseLocationPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
 
-            if (hasPermission) {
+            if (hasAudioPermission && (hasFineLocationPermission || hasCoarseLocationPermission)) {
                 audioManager.startRecording()
             } else {
-                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                permissionLauncher.launch(arrayOf(
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ))
             }
         } else {
-            audioManager.stopRecording()
+            val hasLocationPermission = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (hasLocationPermission) {
+                // Ask GPS for location when recording is stopped
+                fusedLocationClient.getCurrentLocation(
+                    Priority.PRIORITY_HIGH_ACCURACY,
+                    CancellationTokenSource().token
+                ).addOnSuccessListener { location ->
+                    if (location != null) {
+                        audioManager.stopRecording(location.latitude, location.longitude)
+                    } else {
+                        // In case of random errors getting location
+                        audioManager.stopRecording(0.0, 0.0)
+                    }
+                }.addOnFailureListener {
+                    audioManager.stopRecording(0.0, 0.0)
+                }
+            } else {
+                audioManager.stopRecording(0.0, 0.0)
+            }
         }
     }
 

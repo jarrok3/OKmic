@@ -80,4 +80,7 @@ dependencies {
 
     // OBOE
     implementation("com.google.oboe:oboe:1.10.0")
+
+    // Location services
+    implementation("com.google.android.gms:play-services-location:21.2.0")
 }

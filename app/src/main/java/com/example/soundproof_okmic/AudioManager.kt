@@ -14,6 +14,14 @@ import kotlinx.coroutines.launch
 *  VIEWMODEL FOR STORING CONFIGURATION SETTINGS AND MANAGING THE AUDIO STREAM
 */
 
+data class FullNoiseMeasurementData(
+    val timestamp: Long = 0L,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val avgDb: Float = 0.0f,
+    val spectrogram: List<Float> = emptyList()
+)
+
 data class DefaultConfiguration(
     val bufferSize: Int = 2048,
     val fWindowSize: Int = 2048,
@@ -85,6 +93,11 @@ class AudioManager : ViewModel() {
     private val _audioStream = MutableStateFlow(AudioStream())
     val audioStream: StateFlow<AudioStream> = _audioStream.asStateFlow()
 
+    private val _noiseTestResults = MutableStateFlow(FullNoiseMeasurementData())
+    val noiseTestResults: StateFlow<FullNoiseMeasurementData> = _noiseTestResults.asStateFlow()
+
+    private var noiseTestProcessor: NoiseTestProcessor = NoiseTestProcessor()
+
     private var recordingJob: Job? = null
     private val maxHistorySize = 100
 
@@ -146,6 +159,8 @@ class AudioManager : ViewModel() {
 
         openAudio()
         if(_audioStream.value.mode == Mode.NOISETEST){
+            noiseTestProcessor = NoiseTestProcessor()
+            _noiseTestResults.update { FullNoiseMeasurementData() }
             setBufferSize(DefaultConfiguration().bufferSize)
             setFWindowSize(DefaultConfiguration().fWindowSize)
             setAlgo(DefaultConfiguration().algo)
@@ -177,15 +192,32 @@ class AudioManager : ViewModel() {
         recordingJob = viewModelScope.launch {
             while (_audioStream.value.isRecording) {
                 updateAudioResults()
+                if(_audioStream.value.mode.name == "NOISETEST")
+                {
+                    updateMemory()
+                }
                 delay(100) // Update UI every 100ms
             }
         }
     }
 
-    fun stopRecording() {
+    fun stopRecording(currentLat: Double = 0.0, currentLon: Double = 0.0) {
         recordingJob?.cancel()
         stopAudio()
         _audioStream.update { it.copy(isRecording = false) }
+        if(_audioStream.value.mode.name == "NOISETEST")
+        {
+            val results = noiseTestProcessor.getResults()
+            _noiseTestResults.update {
+                it.copy(
+                    timestamp = System.currentTimeMillis(),
+                    avgDb = results.avgDb,
+                    spectrogram = results.spectrogram.toList(),
+                    latitude = currentLat,
+                    longitude = currentLon
+                )
+            }
+        }
         reset()
     }
 
@@ -199,6 +231,15 @@ class AudioManager : ViewModel() {
             dbHistory = emptyList(),
             totalSamples = 0L
         ) }
+    }
+
+    fun updateMemory()
+    {
+        val currentFrame = NoiseFrame(
+            db = audioStream.value.currentDb,
+            fourier = audioStream.value.fourierResults
+        )
+        noiseTestProcessor.pushNoiseFrame(currentFrame)
     }
 
     fun updateAudioResults() {
