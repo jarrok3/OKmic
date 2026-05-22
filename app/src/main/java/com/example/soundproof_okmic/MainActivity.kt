@@ -1,20 +1,25 @@
 package com.example.soundproof_okmic
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,12 +28,19 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.FiberSmartRecord
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialogDefaults
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -41,26 +53,34 @@ import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.log10
+import kotlin.math.max
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -70,37 +90,17 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
-import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 
-fun Context.findActivity(): Activity? {
-    var context = this
-    while (context is ContextWrapper) {
-        if (context is Activity) return context
-        context = context.baseContext
-    }
-    return null
-}
-
+// For unified UI adjustments
 data object InScreenOffset{
     val x = (-12).dp
     val y = (-12).dp
 }
 
 class MainActivity : ComponentActivity() {
-    // External OBOE lib inclusion
-    companion object {
-        init {
-            System.loadLibrary("native-audio-lib")
-        }
-    }
-
-    // External functions for Audio handling
-    external fun openAudio()
-    external fun startAudio()
-    external fun stopAudio()
-    external fun setBufferSize(bufferSize: Int)
-    external fun getAudioResults(): FloatArray?
+    // declare audioManager object to outlive the current activity
+    private val audioManager by viewModels<AudioManager>()
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -130,71 +130,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        stopAudio()
+        audioManager.stopRecording()
     }
 }
 
 // === MAIN LAYOUT ===
 @Composable
-fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
+fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audioManager: AudioManager = viewModel())
 {
-    var isRecording by remember { mutableStateOf(false) }
-    var loudestDb by remember { mutableFloatStateOf(0.0f) }
-    var lowestDb by remember { mutableFloatStateOf(0.0f) }
-    var currentDb by remember { mutableFloatStateOf(0.0f) }
-    var fftResults by remember { mutableStateOf(floatArrayOf()) }
+    val audioStream by audioManager.audioStream.collectAsStateWithLifecycle()
 
-    // Sample history and time counter
-    val dbHistory = remember { mutableStateListOf<Float>() }
-    var totalSamples by remember { mutableLongStateOf(0L) }
-    val maxHistorySize = 100
-
-    // Necessary check of permissions to record from mic
+    val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (!isGranted) {
-            isRecording = false
+        if (isGranted) {
+            audioManager.startRecording()
+        } else {
+            audioManager.changeRecordingState(false)
         }
     }
 
-    val context = LocalContext.current
-    val micChannelActivity = remember(context) {
-        context.findActivity() as? MainActivity
-    }
+    LaunchedEffect(audioStream.isRecording) {
+        if (audioStream.isRecording) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
 
-    LaunchedEffect(isRecording && micChannelActivity != null) {
-        if (isRecording) {
-            // Only if mic recording was allowed
-            if (micChannelActivity?.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                micChannelActivity.openAudio()
-                micChannelActivity.startAudio()
-                dbHistory.clear()
-                totalSamples = 0L
-                while (isRecording) {
-                    val results = micChannelActivity.getAudioResults()
-                    if (results != null && results.size >= 3) {
-                        currentDb = results[0]
-                        loudestDb = results[1]
-                        lowestDb = results[2]
-                        if (results.size > 3) {
-                            fftResults = results.sliceArray(3 until results.size)
-                        }
-                    }
-
-                    dbHistory.add(currentDb)
-                    ++totalSamples
-                    if (dbHistory.size > maxHistorySize) {
-                        dbHistory.removeAt(0)
-                    }
-
-                    delay(100) // Update UI every 100ms
-                }
+            if (hasPermission) {
+                audioManager.startRecording()
             } else {
-                permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
         } else {
-            micChannelActivity?.stopAudio()
+            audioManager.stopRecording()
         }
     }
 
@@ -202,7 +172,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
         modifier = modifier,
         topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
-        floatingActionButton = { FloatingRecordButton(isRecording = isRecording, onRecordingChange = { isRecording = it }) }
+        floatingActionButton = { FloatingRecordButton(onRecordingChange = { audioManager.changeRecordingState(it) }) }
     ) { innerPadding ->
         BoxWithConstraints(
             modifier = Modifier
@@ -220,9 +190,9 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                 horizontalAlignment = Alignment.Start
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Current: $currentDb [dB]")
-                Text("Loudest: $loudestDb [dB]")
-                Text("Lowest: $lowestDb [dB]")
+                Text("Current: ${audioStream.currentDb} [dB]")
+                Text("Loudest: ${audioStream.maxDb} [dB]")
+                Text("Lowest: ${audioStream.minDb} [dB]")
                 HorizontalDivider(
                     modifier = Modifier
                         .padding(vertical = 16.dp)
@@ -230,8 +200,8 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController)
                     thickness = DividerDefaults.Thickness,
                     color = DividerDefaults.color
                 )
-                AudioCanvasDB(isRecording = isRecording, dbHistory = dbHistory, totalSamples = totalSamples)
-                AudioCanvasFFT(isRecording = isRecording, fftResults = fftResults.toList())
+                AudioCanvasDB(isRecording = audioStream.isRecording, dbHistory = audioStream.dbHistory, totalSamples = audioStream.totalSamples)
+                AudioCanvasFFT(isRecording = audioStream.isRecording, fftResults = audioStream.fourierResults.toList())
             }
         }
     }
@@ -270,6 +240,14 @@ fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
 fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
 {
     var expanded by remember {mutableStateOf(false)}
+    var showSettings by remember {mutableStateOf(false)}
+
+    if(showSettings)
+    {
+        SettingsDialogueWindow(
+            onDismiss = { showSettings = false }
+        )
+    }
 
     Box(
         modifier = modifier
@@ -288,6 +266,12 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
             DropdownMenuItem(
                 modifier = Modifier.fillMaxWidth(),
                 text = { Text("My Captures") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.History,
+                        contentDescription = "MyCaptures"
+                    )
+                },
                 onClick = {
                     expanded = false
                     navController.navigate(MyCapturesScreen) {
@@ -300,8 +284,37 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
                 },
                 colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary)
             )
+            DropdownMenuItem(
+                modifier = Modifier.fillMaxWidth(),
+                text = { Text("Settings") },
+                onClick = {
+                    expanded = false
+                    showSettings = true
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings"
+                    )
+                },
+                colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary),
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                modifier = Modifier.fillMaxWidth(),
+                text = { Text("About/Help") },
+                onClick = {  },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Info,
+                        contentDescription = "About/Help"
+                    )
+                },
+                colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.primary),
+            )
         }
     }
+
 }
 
 @Composable
@@ -354,19 +367,20 @@ fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
 }
 
 @Composable
-fun FloatingRecordButton(isRecording: Boolean, onRecordingChange: (Boolean) -> Unit)
+fun FloatingRecordButton(onRecordingChange: (Boolean) -> Unit, audioState: AudioManager = viewModel())
 {
+    val currentAudioStreamState by audioState.audioStream.collectAsStateWithLifecycle()
 
     Button(
         elevation = ButtonDefaults.elevatedButtonElevation(
             defaultElevation = 8.dp
         ),
         shape = ButtonDefaults.shape,
-        onClick = { onRecordingChange(!isRecording) },
+        onClick = { onRecordingChange(!currentAudioStreamState.isRecording) },
         modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
     ) {
         Text(
-            text = "REC "
+            text = if (currentAudioStreamState.isRecording) "STOP " else "REC "
         )
         Icon(
             imageVector = Icons.Rounded.FiberSmartRecord,
@@ -494,10 +508,16 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
             val graphWidth = size.width - leftMargin
             val graphHeight = size.height - bottomMargin
 
-            val barWidth = graphWidth / fftResults.size
-
             val minDb = -80f
             val maxDb = -20f
+
+            val sampleRate = 48000f
+            val nyquist = sampleRate / 2
+            val minFreq = 20f
+            val maxFreq = nyquist
+            
+            val logMin = log10(minFreq)
+            val logMax = log10(maxFreq)
 
             // --- Y AXIS (RELATIVE SOUND LEVEL) ---
             for (db in -100..0 step 20) {
@@ -516,30 +536,46 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
                 )
             }
 
-            // --- X AXIS (FREQUENCY) ---
-            val labels = listOf("0", "5k", "10k", "15k", "20k")
-            labels.forEachIndexed { index, label ->
-                val x = leftMargin + (index.toFloat() / (labels.size - 1)) * graphWidth
-                drawText(
-                    textMeasurer = textMeasurer,
-                    text = label,
-                    style = textStyle,
-                    topLeft = Offset(x - 10.dp.toPx(), graphHeight + 5.dp.toPx())
-                )
+            // --- X AXIS (FREQUENCY) LOGARITHMIC ---
+            val labels = mapOf(20f to "20", 100f to "100", 1000f to "1k", 5000f to "5k", 10000f to "10k", 20000f to "20k")
+            labels.forEach { (freq, label) ->
+                val x = leftMargin + ((log10(freq) - logMin) / (logMax - logMin)) * graphWidth
+                if (x >= leftMargin) {
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(x, 0f),
+                        end = Offset(x, graphHeight),
+                        strokeWidth = 1f
+                    )
+                    drawText(
+                        textMeasurer = textMeasurer,
+                        text = label,
+                        style = textStyle,
+                        topLeft = Offset(x - 10.dp.toPx(), graphHeight + 5.dp.toPx())
+                    )
+                }
             }
 
             // --- SPECTRUM BARS ---
-            for (i in fftResults.indices) {
-                val x = leftMargin + (i * barWidth)
+            val numBins = fftResults.size
+            for (i in 0 until numBins) {
+                val freqStart = (i.toFloat() / numBins) * nyquist
+                val freqEnd = ((i + 1).toFloat() / numBins) * nyquist
+                
+                if (freqEnd < minFreq) continue
+                
+                val xStart = leftMargin + ((log10(max(minFreq, freqStart)) - logMin) / (logMax - logMin)) * graphWidth
+                val xEnd = leftMargin + ((log10(freqEnd) - logMin) / (logMax - logMin)) * graphWidth
+                
                 val magnitude = fftResults[i]
                 val normalizedMag = ((magnitude - minDb) / (maxDb - minDb)).coerceIn(0f, 1f)
                 val barHeight = normalizedMag * graphHeight
 
                 drawRect(
                     color = strokeColor,
-                    topLeft = Offset(x, graphHeight - barHeight),
-                    size = androidx.compose.ui.geometry.Size(
-                        width = barWidth.coerceAtLeast(1f),
+                    topLeft = Offset(xStart, graphHeight - barHeight),
+                    size = Size(
+                        width = (xEnd - xStart).coerceAtLeast(1f),
                         height = barHeight
                     )
                 )
@@ -586,6 +622,225 @@ fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
             Text(
                 text = "Dzień Dobry Polsko witam serdecznie!"
             )
+        }
+    }
+}
+
+// === SETTINGS DIALOG MENU ===
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, audioManager: AudioManager = viewModel())
+{
+    // Get viewModel configSettings
+    val currentConfigState by audioManager.configData.collectAsStateWithLifecycle()
+
+    // For connecting UI updates to viewModel changes
+    var sliderPosition: Float by remember { mutableFloatStateOf(currentConfigState.noiseGateThreshold) }
+    var isGateEnabled: Boolean by remember { mutableStateOf(currentConfigState.noiseGateEnabled) }
+    var algo: String by remember { mutableStateOf(currentConfigState.algo) }
+    var fWindowSize: Int by remember { mutableIntStateOf(currentConfigState.fWindowSize) }
+    var bufferSize: Int by remember { mutableIntStateOf(currentConfigState.bufferSize) }
+
+    // Dropdown Menus controls
+    var expandedBufferMenu by remember { mutableStateOf(false) }
+    var expandedWindowMenu by remember { mutableStateOf(false) }
+    var expandedAlgoMenu by remember { mutableStateOf(false) }
+
+    BasicAlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            windowTitle = "Settings"
+        )
+    ) {
+        Surface(
+            modifier = modifier.fillMaxWidth().padding(16.dp),
+            shape = MaterialTheme.shapes.large,
+            tonalElevation = AlertDialogDefaults.TonalElevation
+        ){
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            )
+            {
+                Text(
+                    text = "Remember to apply your changes for them to take effect!"
+                )
+
+                // NOISE GATE
+                Text(text = "Enable Noise Gate")
+                Checkbox(
+                    checked = isGateEnabled,
+                    onCheckedChange = {isGateEnabled = it}
+                )
+                if(isGateEnabled)
+                {
+                    Slider(
+                        value = sliderPosition,
+                        onValueChange = { newValue ->
+                            sliderPosition = newValue
+                        },
+                        valueRange = -80f..0f
+                    )
+                    Text("$sliderPosition dB")
+                }
+
+                // BUFFER SIZE
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Select buffer size: ")
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .clickable { expandedBufferMenu = !expandedBufferMenu }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("$bufferSize")
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                        }
+
+                        DropdownMenu(
+                            expanded = expandedBufferMenu,
+                            onDismissRequest = {expandedBufferMenu = false}
+                        ){
+                            DropdownMenuItem(
+                                text = { Text("512") },
+                                onClick = { bufferSize = 512; expandedBufferMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("1024") },
+                                onClick = { bufferSize = 1024; expandedBufferMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("2048") },
+                                onClick = { bufferSize = 2048; expandedBufferMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("4096") },
+                                onClick = { bufferSize = 4096; expandedBufferMenu = false }
+                            )
+                        }
+                    }
+                }
+
+                // WINDOW SIZE
+                LaunchedEffect(bufferSize)
+                {
+                    if (bufferSize < fWindowSize) {
+                        fWindowSize = bufferSize
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Select window size: ")
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .clickable { expandedWindowMenu = !expandedWindowMenu }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("$fWindowSize")
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                        }
+
+                        DropdownMenu(
+                            expanded = expandedWindowMenu,
+                            onDismissRequest = {expandedWindowMenu = false}
+                        ){
+                            DropdownMenuItem(
+                                text = { Text("512") },
+                                onClick = { fWindowSize = 512; expandedWindowMenu = false }
+                            )
+                            if(bufferSize >= 1024){
+                                DropdownMenuItem(
+                                    text = { Text("1024") },
+                                    onClick = { fWindowSize = 1024; expandedWindowMenu = false }
+                                )
+                            }
+                            if(bufferSize >= 2048) {
+                                DropdownMenuItem(
+                                    text = { Text("2048") },
+                                    onClick = { fWindowSize= 2048; expandedWindowMenu = false }
+                                )
+                            }
+                            if(bufferSize >= 4096) {
+                                DropdownMenuItem(
+                                    text = { Text("4096") },
+                                    onClick = { fWindowSize = 4096; expandedWindowMenu = false }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // WINDOW ALGORITHM
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Select windowing algorithm: ")
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedAlgoMenu = !expandedAlgoMenu }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(algo)
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = "")
+                        }
+
+                        DropdownMenu(
+                            expanded = expandedAlgoMenu,
+                            onDismissRequest = {expandedAlgoMenu = false}
+                        ){
+                            DropdownMenuItem(
+                                text = { Text("Hann") },
+                                onClick = { algo = "Hann"; expandedAlgoMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Hamming") },
+                                onClick = { algo = "Hamming"; expandedAlgoMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Blackman") },
+                                onClick = { algo = "Blackman"; expandedAlgoMenu = false }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        audioManager.setNoiseGateEnabled(isGateEnabled)
+                        audioManager.setNoiseGateThreshold(sliderPosition)
+                        audioManager.changeBufferSize(bufferSize)
+                        audioManager.changeFWindowSize(fWindowSize)
+                        audioManager.setAlgo(algo)
+                        onDismiss()
+                    }
+                ) {
+                    Text("Apply Changes")
+                }
+            }
         }
     }
 }
