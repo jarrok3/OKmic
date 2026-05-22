@@ -10,6 +10,12 @@
 #include <condition_variable>
 #include "AudioDataListener.h"
 
+enum class AlgoType {
+    Hann,
+    Hamming,
+    Blackman
+};
+
 class DSPmodule{
 private:
     AudioDataListener* listener = nullptr;
@@ -21,6 +27,8 @@ private:
     std::unique_ptr<LockFreeQueue<float>> ringBuffer;
     std::atomic<int> bufferSize;
     std::atomic<int> fwindowSize;
+    std::atomic<AlgoType> algoType;
+    std::atomic<float> noiseThreshold;
 
     // DSP processing methods
     float _calcRMS(std::vector<float>& workingBuffer);
@@ -55,6 +63,8 @@ public:
     // Setters
     void setFWindowSize(int fwindowSize);
     void setBufferSize(int bufferSize);
+    void setAlgoType(std::string algo);
+    void setNoiseThreshold(float nt);
 };
 
 #endif //SOUNDPROOF_OKMIC_DSPMODULE_H

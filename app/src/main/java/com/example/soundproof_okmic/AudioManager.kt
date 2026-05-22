@@ -95,10 +95,18 @@ class AudioManager : ViewModel() {
 
     fun setNoiseGateThreshold(threshold: Float) {
         _configData.update { it.copy(noiseGateThreshold = threshold) }
+        if(_audioStream.value.isRecording && _configData.value.noiseGateEnabled)
+        {
+            setNoiseThreshold(threshold)
+        }
     }
 
     fun setAlgo(algo: String){
         _configData.update { it.copy(algo = algo) }
+        if (_audioStream.value.isRecording)
+        {
+            setAlgoType(algo)
+        }
     }
 
     // AudioStream Changes:
@@ -112,6 +120,11 @@ class AudioManager : ViewModel() {
         openAudio()
         setBufferSize(_configData.value.bufferSize)
         setFWindowSize(_configData.value.fWindowSize)
+        setAlgo(_configData.value.algo)
+        if(_configData.value.noiseGateEnabled)
+        {
+            setNoiseThreshold(_configData.value.noiseGateThreshold)
+        }
         startAudio()
         _audioStream.update {
             it.copy(
@@ -197,5 +210,7 @@ class AudioManager : ViewModel() {
     private external fun stopAudio()
     private external fun setBufferSize(bufferSize: Int)
     private external fun setFWindowSize(fwindowSize: Int)
+    private external fun setAlgoType(algo: String)
+    private external fun setNoiseThreshold(threshold: Float)
     private external fun getAudioResults(): FloatArray?
 }

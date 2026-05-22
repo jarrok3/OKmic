@@ -8,6 +8,7 @@
 #include <mutex>
 #include "DSPmodule.h"
 #include "AudioDataListener.h"
+#include <string>
 
 class AudioEngine : public oboe::AudioStreamDataCallback, public AudioDataListener {
 private:
@@ -27,6 +28,8 @@ public:
     void stopStream();
     void setFWindowSize(int bs);
     void setBufferSize(int bs);
+    void setAlgoType(std::string algo);
+    void setNoiseThreshold(float nt);
 
     oboe::DataCallbackResult onAudioReady(
             oboe::AudioStream *audioStream,

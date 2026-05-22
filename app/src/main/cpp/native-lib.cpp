@@ -38,6 +38,16 @@ extern "C" {
         gEngine->setBufferSize(buffer_size);
     }
 
+    JNIEXPORT void JNICALL
+    Java_com_example_soundproof_1okmic_AudioManager_setAlgoType(JNIEnv *env, jobject thiz, jstring algo) {
+        gEngine->setAlgoType(reinterpret_cast<const std::string &>(algo));
+    }
+
+    JNIEXPORT void JNICALL
+    Java_com_example_soundproof_1okmic_AudioManager_setNoiseThreshold(JNIEnv *env, jobject thiz, jfloat noise_threshold) {
+        gEngine->setNoiseThreshold(noise_threshold);
+    }
+
     JNIEXPORT jfloatArray JNICALL
     Java_com_example_soundproof_1okmic_AudioManager_getAudioResults(JNIEnv *env, jobject thiz) {
         if (!gEngine) return nullptr;

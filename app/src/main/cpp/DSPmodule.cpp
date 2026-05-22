@@ -8,7 +8,7 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-DSPmodule::DSPmodule() : currentDB(0.0f), maxDB(-100.0f), minDB(100.0f), ringBuffer(std::make_unique<LockFreeQueue<float>>(1024)), fwindowSize(1024), bufferSize(1024)
+DSPmodule::DSPmodule() : currentDB(0.0f), maxDB(-100.0f), minDB(100.0f), ringBuffer(std::make_unique<LockFreeQueue<float>>(1024)), fwindowSize(1024), bufferSize(1024), algoType(AlgoType::Hann), noiseThreshold(-100.0f), latestFourierResults({})
 {
     isRunning = true;
     processingThread = std::thread(&DSPmodule::_processingLoop, this);
@@ -25,14 +25,30 @@ DSPmodule::~DSPmodule() {
 void DSPmodule::setFWindowSize(int size){
     if (size <= 0 || (size & (size - 1)) != 0)
         throw std::invalid_argument("DSP: Window size must be a positive power of 2");
-    fwindowSize = size;
+    fwindowSize.store(size);
 }
 
 void DSPmodule::setBufferSize(int size) {
     if (size <= 0 || (size & (size - 1)) != 0)
         throw std::invalid_argument("DSP: Buffer size must be a positive power of 2");
-    bufferSize = size;
+    bufferSize.store(size);
     _resetBuffer();
+}
+
+void DSPmodule::setAlgoType(std::string algo){
+    if (algo == "Hann") {
+        algoType.store(AlgoType::Hann);
+    } else if (algo == "Hamming") {
+        algoType.store(AlgoType::Hamming);
+    } else if (algo == "Blackman") {
+        algoType.store(AlgoType::Blackman);
+    } else {
+        algoType.store(AlgoType::Hann);
+    }
+}
+
+void DSPmodule::setNoiseThreshold(float nt) {
+    noiseThreshold.store(nt);
 }
 
 bool DSPmodule::_resetBuffer() {
@@ -77,6 +93,11 @@ void DSPmodule::_processingLoop(){
         float rms = _calcRMS(workingBuffer);
         currentDB = 20.0f * std::log10(std::max(rms, 1e-9f));
 
+        // Skip further processing if below noise threshold
+        if (currentDB < noiseThreshold.load()) {
+            continue;
+        }
+
         if (currentDB > maxDB) maxDB = currentDB;
         if (currentDB < minDB) minDB = currentDB;
 
@@ -108,10 +129,28 @@ std::vector<float> DSPmodule::_fourierTransform(std::vector<float>& workingBuffe
     int n = fwindowSize;
     int dataSize = static_cast<int>(workingBuffer.size());
 
-    // 1. Hann Windowing
-    for (int i = 0; i < std::min(n, dataSize); i++) {
-        float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (n - 1.0f)));
-        workingBuffer[i] *= window;
+    // 1. Windowing
+    switch(algoType.load()){
+        case AlgoType::Hann:
+            for (int i = 0; i < std::min(n, dataSize); i++) {
+                float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (n - 1.0f)));
+                workingBuffer[i] *= window;
+            }
+            break;
+        case AlgoType::Hamming:
+            for (int i = 0; i < std::min(n, dataSize); i++) {
+                float window = 0.54f - 0.46f * cosf(2.0f * M_PI * i / (n - 1.0f));
+                workingBuffer[i] *= window;
+            }
+            break;
+        case AlgoType::Blackman:
+            for (int i = 0; i < std::min(n, dataSize); i++) {
+                float window = 0.42f - 0.5f * cosf(2.0f * M_PI * i / (n - 1.0f)) + 0.08f * cosf(4.0f * M_PI * i / (n - 1.0f));
+                workingBuffer[i] *= window;
+            }
+            break;
+        default:
+            break;
     }
 
     // 2. Prepare complex buffer for FFT

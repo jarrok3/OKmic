@@ -116,4 +116,12 @@ AudioResults AudioEngine::getLatestResults() {
     return mLatestResults;
 }
 
+void AudioEngine::setAlgoType(std::string algo) {
+    this->dspProcessor->setAlgoType(algo);
+}
+
+void AudioEngine::setNoiseThreshold(float nt) {
+    this->dspProcessor->setNoiseThreshold(nt);
+}
+
 
