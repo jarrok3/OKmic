@@ -99,6 +99,10 @@ class AudioManager : ViewModel() {
         {
             setNoiseThreshold(threshold)
         }
+        if(!_configData.value.noiseGateEnabled)
+        {
+            _configData.update { it.copy(noiseGateThreshold = -80f) }
+        }
     }
 
     fun setAlgo(algo: String){
