@@ -15,6 +15,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.ArrowDropDown
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.SaveAs
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
@@ -45,6 +48,7 @@ import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -172,7 +176,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
         modifier = modifier,
         topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
-        floatingActionButton = { FloatingRecordButton(onRecordingChange = { audioManager.changeRecordingState(it) }) }
+        floatingActionButton = {}
     ) { innerPadding ->
         BoxWithConstraints(
             modifier = Modifier
@@ -190,9 +194,43 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
                 horizontalAlignment = Alignment.Start
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Current: ${audioStream.currentDb} [dB]")
-                Text("Loudest: ${audioStream.maxDb} [dB]")
-                Text("Lowest: ${audioStream.minDb} [dB]")
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    BoxWithConstraints(
+                        modifier = Modifier.width(this@BoxWithConstraints.maxWidth.value.dp/2)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                        ) {
+                            Text("Current: ${audioStream.currentDb} [dB]")
+                            Text("Loudest: ${audioStream.maxDb} [dB]")
+                            Text("Lowest: ${audioStream.minDb} [dB]")
+                        }
+                    }
+                    BoxWithConstraints(
+                        modifier = Modifier.width(this@BoxWithConstraints.maxWidth.value.dp/2),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth(),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            FloatingModeButton(
+                                onModeChange = { isRecording, mode ->
+                                    audioManager.changeRecordingState(isRecording)
+                                    audioManager.changeRecordingMode(mode)
+                                }
+                            )
+                            FloatingRecordButton(
+                                onRecordingChange = { audioManager.changeRecordingState(it) }
+                            )
+                        }
+                    }
+                }
+
                 HorizontalDivider(
                     modifier = Modifier
                         .padding(vertical = 16.dp)
@@ -237,8 +275,9 @@ fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
 
 
 @Composable
-fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
+fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier, audioManager: AudioManager = viewModel())
 {
+    val currentAudioMode by audioManager.audioStream.collectAsStateWithLifecycle()
     var expanded by remember {mutableStateOf(false)}
     var showSettings by remember {mutableStateOf(false)}
 
@@ -287,6 +326,7 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
             DropdownMenuItem(
                 modifier = Modifier.fillMaxWidth(),
                 text = { Text("Settings") },
+                enabled = if(currentAudioMode.mode.name == "FREEROAM") true else false,
                 onClick = {
                     expanded = false
                     showSettings = true
@@ -362,6 +402,33 @@ fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
                 )
             },
             label = {  }
+        )
+    }
+}
+
+// Used for toggling recording mode
+@Composable
+fun FloatingModeButton(onModeChange: (Boolean, String) -> Unit, audioState: AudioManager = viewModel())
+{
+    val currentAudioStreamState by audioState.audioStream.collectAsStateWithLifecycle()
+
+    Button(
+        elevation = ButtonDefaults.elevatedButtonElevation(
+            defaultElevation = 8.dp
+        ),
+        shape = ButtonDefaults.shape,
+        onClick = {
+            val nextMode = if (currentAudioStreamState.mode.name == "FREEROAM") "NOISETEST" else "FREEROAM"
+            onModeChange(false, nextMode)
+        },
+        modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
+    ) {
+        Text(
+            text = if (currentAudioStreamState.mode.name == "FREEROAM") "FREE" else "TEST"
+        )
+        Icon(
+            imageVector = Icons.Rounded.SaveAs,
+            contentDescription = "Modechange_audio"
         )
     }
 }

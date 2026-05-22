@@ -14,6 +14,14 @@ import kotlinx.coroutines.launch
 *  VIEWMODEL FOR STORING CONFIGURATION SETTINGS AND MANAGING THE AUDIO STREAM
 */
 
+data class DefaultConfiguration(
+    val bufferSize: Int = 2048,
+    val fWindowSize: Int = 2048,
+    val noiseGateEnabled: Boolean = true,
+    val noiseGateThreshold: Float = -50f,
+    val algo: String = "Blackman"
+)
+
 data class ConfigurationData(
     val bufferSize: Int = 1024,
     val fWindowSize: Int = 1024,
@@ -22,9 +30,15 @@ data class ConfigurationData(
     val algo: String = "Hann"
 )
 
+enum class Mode{
+    FREEROAM,
+    NOISETEST
+}
+
 data class AudioStream(
     val isRecording: Boolean = false,
-    val currentDb: Float = 0.0f,
+    val mode: Mode = Mode.FREEROAM,
+    val currentDb: Float = -80.0f,
     val maxDb: Float = -100.0f,
     val minDb:Float = 100.0f,
     val fourierResults: FloatArray = floatArrayOf(),
@@ -39,6 +53,7 @@ data class AudioStream(
         other as AudioStream
 
         if (isRecording != other.isRecording) return false
+        if (mode != other.mode) return false
         if (currentDb != other.currentDb) return false
         if (maxDb != other.maxDb) return false
         if (minDb != other.minDb) return false
@@ -51,6 +66,7 @@ data class AudioStream(
 
     override fun hashCode(): Int {
         var result = isRecording.hashCode()
+        result = 31 * result + mode.hashCode()
         result = 31 * result + currentDb.hashCode()
         result = 31 * result + maxDb.hashCode()
         result = 31 * result + minDb.hashCode()
@@ -114,17 +130,40 @@ class AudioManager : ViewModel() {
         _audioStream.update { it.copy(isRecording = active) }
     }
 
+    fun changeRecordingMode(mode: String) {
+        if(mode == "FREEROAM")
+        {
+            _audioStream.update { it.copy(mode = Mode.FREEROAM) }
+        }
+        if(mode == "NOISETEST")
+        {
+            _audioStream.update { it.copy(mode = Mode.NOISETEST) }
+        }
+    }
+
     fun startRecording() {
         if (recordingJob?.isActive == true) return
 
         openAudio()
-        setBufferSize(_configData.value.bufferSize)
-        setFWindowSize(_configData.value.fWindowSize)
-        setAlgo(_configData.value.algo)
-        if(_configData.value.noiseGateEnabled)
-        {
-            setNoiseThreshold(_configData.value.noiseGateThreshold)
+        if(_audioStream.value.mode == Mode.NOISETEST){
+            setBufferSize(DefaultConfiguration().bufferSize)
+            setFWindowSize(DefaultConfiguration().fWindowSize)
+            setAlgo(DefaultConfiguration().algo)
+            if(DefaultConfiguration().noiseGateEnabled) // always true, but kept for readability
+            {
+                setNoiseThreshold(DefaultConfiguration().noiseGateThreshold)
+            }
         }
+        else{
+            setBufferSize(_configData.value.bufferSize)
+            setFWindowSize(_configData.value.fWindowSize)
+            setAlgo(_configData.value.algo)
+            if(_configData.value.noiseGateEnabled)
+            {
+                setNoiseThreshold(_configData.value.noiseGateThreshold)
+            }
+        }
+
         startAudio()
         _audioStream.update {
             it.copy(
