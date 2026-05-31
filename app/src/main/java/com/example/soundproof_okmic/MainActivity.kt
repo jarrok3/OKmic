@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.ArrowDropDown
@@ -39,8 +42,11 @@ import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -140,7 +147,7 @@ class MainActivity : ComponentActivity() {
                         MainLayout(navController = navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MyCapturesScreen>{
-                        MyCapturesLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
+                        MyCapturesLayout(navController, audioManager = audioManager, databaseManager = databaseManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MapsScreen>{
                         NoiseMapLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
@@ -719,22 +726,108 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
 
 // === MY CAPTURES LAYOUT ===
 @Composable
-fun MyCapturesLayout(navController: NavController, audioManager: AudioManager, modifier : Modifier = Modifier) {
+fun MyCapturesLayout(
+    navController: NavController,
+    audioManager: AudioManager,
+    databaseManager: DatabaseManager,
+    modifier: Modifier = Modifier
+) {
+    // List for raw data retrieval from supabase
+    var measurementsList by remember { mutableStateOf<List<NoiseMeasurementDto>>(emptyList()) }
+    var isCheckingDb by remember { mutableStateOf(true) }
+
+    // Download data
+    LaunchedEffect(Unit) {
+        measurementsList = databaseManager.fetchAllMeasurements()
+        isCheckingDb = false
+    }
+
     Scaffold(
-        topBar = { TopNavBar(
-            navController,
-            audioManager = audioManager,
-            modifier = Modifier.fillMaxWidth())
-        },
+        topBar = { TopNavBar(navController, audioManager = audioManager, modifier = Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
+        Box(
+            modifier = modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Text(
-                text = "Dzień Dobry Polsko witam serdecznie!"
+            if (isCheckingDb) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(measurementsList) { item ->
+                        RawMeasurementRow(dto = item)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RawMeasurementRow(dto: NoiseMeasurementDto) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "Timestamp: ${dto.timestamp_ms}")
+            Text(text = "Location (WKT): ${dto.location}")
+            Text(text = "Average dB: ${dto.avg_db}")
+            Text(text = "Spectrogram samples: ${dto.spectrogram.size}")
+
+            // Spectrogram draw!
+            if (dto.spectrogram.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp)
+                        .background(Color.Black)
+                ) {
+                    SpectrogramDrawing(
+                        rawData = dto.spectrogram,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SpectrogramDrawing(rawData: List<Float>, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val sampleCount = rawData.size
+        val barWidth = if (sampleCount > 0) width / sampleCount else 0f
+
+        val minDb = -80f
+        val maxDb = 0f
+        val range = maxDb - minDb
+
+        for (i in rawData.indices) {
+            val db = rawData[i]
+
+            // Normalize value to fit drawing window height (0f to 1f)
+            val normalizedHeight = ((db - minDb) / range).coerceIn(0f, 1f)
+            val barHeight = normalizedHeight * height
+
+            val xPos = i * barWidth
+
+            // Draw vertical bar for each frequency bin
+            drawLine(
+                color = Color.Green,
+                start = Offset(xPos + barWidth / 2, height),
+                end = Offset(xPos + barWidth / 2, height - barHeight),
+                strokeWidth = barWidth
             )
         }
     }
