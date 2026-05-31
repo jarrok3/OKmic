@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FiberSmartRecord
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
@@ -82,6 +83,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -101,6 +103,7 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.serialization.Serializable
+import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
 
@@ -769,7 +772,7 @@ fun MyCapturesLayout(
 }
 
 @Composable
-fun RawMeasurementRow(dto: NoiseMeasurementDto) {
+fun RawMeasurementRow(dto: NoiseMeasurementDto, onDelete: (NoiseMeasurementDto) -> Unit = {}) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -778,7 +781,23 @@ fun RawMeasurementRow(dto: NoiseMeasurementDto) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(text = "Timestamp: ${dto.timestamp_ms}")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Timestamp: ${dto.timestamp_ms}",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                IconButton(onClick = { onDelete(dto) }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = "Delete measurement",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
             Text(text = "Location (WKT): ${dto.location}")
             Text(text = "Average dB: ${dto.avg_db}")
             Text(text = "Spectrogram samples: ${dto.spectrogram.size}")
@@ -788,12 +807,12 @@ fun RawMeasurementRow(dto: NoiseMeasurementDto) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(100.dp)
+                        .height(300.dp)
                         .background(Color.Black)
                 ) {
                     SpectrogramDrawing(
                         rawData = dto.spectrogram,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
@@ -802,34 +821,142 @@ fun RawMeasurementRow(dto: NoiseMeasurementDto) {
 }
 
 @Composable
-fun SpectrogramDrawing(rawData: List<Float>, modifier: Modifier = Modifier) {
+fun SpectrogramDrawing(
+    rawData: List<Float>,
+    fWindowSize: Int = 2048,
+    modifier: Modifier = Modifier
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = TextStyle(color = Color.Gray, fontSize = 10.sp)
+
     Canvas(modifier = modifier) {
-        val width = size.width
-        val height = size.height
-        val sampleCount = rawData.size
-        val barWidth = if (sampleCount > 0) width / sampleCount else 0f
+        val totalWidth = size.width
+        val totalHeight = size.height
 
-        val minDb = -80f
-        val maxDb = 0f
-        val range = maxDb - minDb
+        val paddingLeft = 55.dp.toPx()
+        val paddingBottom = 25.dp.toPx()
 
-        for (i in rawData.indices) {
-            val db = rawData[i]
+        val graphWidth = totalWidth - paddingLeft
+        val graphHeight = totalHeight - paddingBottom
 
-            // Normalize value to fit drawing window height (0f to 1f)
-            val normalizedHeight = ((db - minDb) / range).coerceIn(0f, 1f)
-            val barHeight = normalizedHeight * height
+        val frequencyBins = fWindowSize
+        if (frequencyBins <= 0 || rawData.isEmpty()) return@Canvas
 
-            val xPos = i * barWidth
+        val timeSteps = rawData.size / frequencyBins
+        if (timeSteps <= 0) return@Canvas
 
-            // Draw vertical bar for each frequency bin
+        val cellWidth = graphWidth / timeSteps
+
+        val minDb = -100f
+        val maxDb = -30f
+        val dbRange = maxDb - minDb
+
+        val maxHz = 24000.0
+        val logMaxHz = ln(maxHz + 1.0)
+
+        for (t in 0 until timeSteps) {
+            val xPos = paddingLeft + (t * cellWidth)
+
+            for (f in 0 until frequencyBins) {
+                val flatIndex = t * frequencyBins + f
+                if (flatIndex >= rawData.size) break
+
+                val db = rawData[flatIndex]
+                val intensity = ((db - minDb) / dbRange).coerceIn(0f, 1f)
+
+                val currentHz = (f.toDouble() / frequencyBins) * maxHz
+                val logCurrentHz = ln(currentHz + 1.0)
+                val yPos = graphHeight - ((logCurrentHz / logMaxHz).toFloat() * graphHeight)
+
+                val nextHz = ((f + 1).toDouble() / frequencyBins) * maxHz
+                val logNextHz = ln(nextHz + 1.0)
+                val nextYPos = graphHeight - ((logNextHz / logMaxHz).toFloat() * graphHeight)
+
+                val cellHeight = (yPos - nextYPos).coerceAtLeast(1f)
+                if (intensity > 0.05f) {
+                    drawRect(
+                        color = Color(
+                            red = intensity,
+                            green = intensity * 0.8f,
+                            blue = (1f - intensity) * 0.5f,
+                            alpha = 1f
+                        ),
+                        topLeft = Offset(xPos, nextYPos),
+                        size = Size(cellWidth + 0.5f, cellHeight + 0.5f)
+                    )
+                }
+            }
+        }
+
+        val freqLabels = listOf(
+            100 to "100 Hz",
+            500 to "500 Hz",
+            1000 to "1 kHz",
+            5000 to "5 kHz",
+            10000 to "10 kHz",
+            20000 to "20 kHz"
+        )
+
+        freqLabels.forEach { (hz, text) ->
+            val logCurrentHz = ln(hz.toDouble() + 1.0)
+            val normalizedY = (logCurrentHz / logMaxHz).toFloat().coerceIn(0f, 1f)
+            val yPos = graphHeight - (normalizedY * graphHeight)
+
             drawLine(
-                color = Color.Green,
-                start = Offset(xPos + barWidth / 2, height),
-                end = Offset(xPos + barWidth / 2, height - barHeight),
-                strokeWidth = barWidth
+                color = Color.White.copy(alpha = 0.15f),
+                start = Offset(paddingLeft, yPos),
+                end = Offset(totalWidth, yPos),
+                strokeWidth = 1f
+            )
+
+            val textLayoutResult = textMeasurer.measure(text, style = labelStyle)
+            drawText(
+                textMeasurer = textMeasurer,
+                text = text,
+                style = labelStyle,
+                topLeft = Offset(
+                    x = paddingLeft - textLayoutResult.size.width - 8f,
+                    y = yPos - (textLayoutResult.size.height / 2f)
+                )
             )
         }
+
+        val totalSeconds = timeSteps / 10f
+        val stepIntervalSeconds = when {
+            totalSeconds <= 5 -> 1
+            totalSeconds <= 20 -> 2
+            else -> 5
+        }
+
+        for (sec in 0..totalSeconds.toInt() step stepIntervalSeconds) {
+            val correspondingTimeStep = sec * 10
+            if (correspondingTimeStep >= timeSteps) break
+
+            val xPos = paddingLeft + (correspondingTimeStep * cellWidth)
+
+            drawLine(
+                color = Color.White.copy(alpha = 0.1f),
+                start = Offset(xPos, 0f),
+                end = Offset(xPos, graphHeight),
+                strokeWidth = 1f
+            )
+
+            val text = "${sec}.0s"
+            val textLayoutResult = textMeasurer.measure(text, style = labelStyle)
+
+            drawText(
+                textMeasurer = textMeasurer,
+                text = text,
+                style = labelStyle,
+                topLeft = Offset(
+                    x = xPos - (textLayoutResult.size.width / 2f),
+                    y = graphHeight + 6f
+                )
+            )
+        }
+
+        drawLine(Color.Gray, Offset(paddingLeft, 0f), Offset(paddingLeft, graphHeight), 2f)
+        drawLine(Color.Gray, Offset(paddingLeft, graphHeight), Offset(totalWidth, graphHeight), 2f)
     }
 }
 
