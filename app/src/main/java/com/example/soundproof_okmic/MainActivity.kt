@@ -1,5 +1,6 @@
 package com.example.soundproof_okmic
 
+import com.example.soundproof_okmic.BuildConfig
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -107,8 +108,8 @@ class MainActivity : ComponentActivity() {
     // create a supabase Client
     private val supabaseClient by lazy {
         createSupabaseClient(
-            supabaseUrl = "https://TWÓJ_PROJEKT.supabase.co",
-            supabaseKey = "TWÓJ_ANON_PUBLIC_KEY"
+            supabaseUrl = BuildConfig.SUPABASE_URL,
+            supabaseKey = BuildConfig.SUPABASE_PUBLISHABLE_KEY
         ) {
             install(Postgrest)
         }

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -11,6 +13,21 @@ android {
             minorApiLevel = 1
         }
     }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    // Read from local.properties
+    val localProperties = Properties().apply {
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            localPropertiesFile.inputStream().use { load(it) }
+        }
+    }
+
+    val supabaseUrl = localProperties.getProperty("SUPABASE_URL") ?: ""
+    val supabaseKey = localProperties.getProperty("SUPABASE_PUBLISHABLE_KEY") ?: ""
 
     defaultConfig {
         applicationId = "com.example.soundproof_okmic"
@@ -26,6 +43,9 @@ android {
                 arguments("-DANDROID_STL=c++_shared")
             }
         }
+
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
     }
 
     externalNativeBuild {
