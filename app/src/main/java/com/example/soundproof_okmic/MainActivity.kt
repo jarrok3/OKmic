@@ -839,7 +839,7 @@ fun SpectrogramDrawing(
         val graphWidth = totalWidth - paddingLeft
         val graphHeight = totalHeight - paddingBottom
 
-        val frequencyBins = fWindowSize
+        val frequencyBins = fWindowSize / 2
         if (frequencyBins <= 0 || rawData.isEmpty()) return@Canvas
 
         val timeSteps = rawData.size / frequencyBins
