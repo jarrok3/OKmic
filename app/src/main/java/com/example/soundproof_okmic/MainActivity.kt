@@ -1,6 +1,5 @@
 package com.example.soundproof_okmic
 
-import com.example.soundproof_okmic.BuildConfig
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -141,10 +140,10 @@ class MainActivity : ComponentActivity() {
                         MainLayout(navController = navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MyCapturesScreen>{
-                        MyCapturesLayout(navController, modifier = Modifier.fillMaxSize())
+                        MyCapturesLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MapsScreen>{
-                        NoiseMapLayout(navController, modifier = Modifier.fillMaxSize())
+                        NoiseMapLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -154,6 +153,11 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         audioManager.stopRecording()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        databaseManager.cleanup()
     }
 }
 
@@ -233,7 +237,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
 
     Scaffold(
         modifier = modifier,
-        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        topBar = { TopNavBar(navController, audioManager, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
         floatingActionButton = {}
     ) { innerPadding ->
@@ -308,7 +312,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
+fun TopNavBar(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier) {
     // Remember route
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -322,7 +326,7 @@ fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
 
     CenterAlignedTopAppBar(
         actions = {
-            DropDownMenu(navController, modifier = Modifier.padding(14.dp))
+            DropDownMenu(navController, audioManager = audioManager, modifier = Modifier.padding(14.dp))
         },
         title = { Text(title) },
         modifier = modifier,
@@ -336,7 +340,7 @@ fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
 
 
 @Composable
-fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier, audioManager: AudioManager = viewModel())
+fun DropDownMenu(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier)
 {
     val currentAudioMode by audioManager.audioStream.collectAsStateWithLifecycle()
     var expanded by remember {mutableStateOf(false)}
@@ -345,7 +349,8 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier, au
     if(showSettings)
     {
         SettingsDialogueWindow(
-            onDismiss = { showSettings = false }
+            onDismiss = { showSettings = false },
+            audioManager = audioManager
         )
     }
 
@@ -714,9 +719,13 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
 
 // === MY CAPTURES LAYOUT ===
 @Composable
-fun MyCapturesLayout(navController: NavController, modifier : Modifier = Modifier) {
+fun MyCapturesLayout(navController: NavController, audioManager: AudioManager, modifier : Modifier = Modifier) {
     Scaffold(
-        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        topBar = { TopNavBar(
+            navController,
+            audioManager = audioManager,
+            modifier = Modifier.fillMaxWidth())
+        },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
     ) { innerPadding ->
         Column(
@@ -733,9 +742,9 @@ fun MyCapturesLayout(navController: NavController, modifier : Modifier = Modifie
 
 // === NOISE MAP LAYOUT ===
 @Composable
-fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
+fun NoiseMapLayout(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier){
     Scaffold(
-        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        topBar = { TopNavBar(navController, audioManager, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
     ) { innerPadding ->
         Column(
@@ -753,7 +762,7 @@ fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
 // === SETTINGS DIALOG MENU ===
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, audioManager: AudioManager = viewModel())
+fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, audioManager: AudioManager)
 {
     // Get viewModel configSettings
     val currentConfigState by audioManager.configData.collectAsStateWithLifecycle()

@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 import android.util.Log
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
+import kotlinx.coroutines.cancel
 
 @Serializable
 data class NoiseMeasurementDto(
@@ -57,5 +58,9 @@ class DatabaseManager(
                     }
                 }
         }
+    }
+
+    fun cleanup() {
+        databaseScope.cancel()
     }
 }
