@@ -934,6 +934,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
+                        audioManager.stopRecording()
                         audioManager.setNoiseGateEnabled(isGateEnabled)
                         audioManager.setNoiseGateThreshold(sliderPosition)
                         audioManager.changeBufferSize(bufferSize)

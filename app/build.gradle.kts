@@ -85,15 +85,19 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.2.0")
 
     // Supabase connection setup
-    implementation(platform("io.github.jan-tennert.supabase:bom:3.6.0"))
-    implementation("io.github.jan-tennert.supabase:supabase-kt")
-    implementation("io.github.jan-tennert.supabase:postgrest-kt")
-    implementation("io.github.jan-tennert.supabase:gotrue-kt")
-    implementation("io.github.jan-tennert.supabase:storage-kt")
-    implementation("io.github.jan-tennert.supabase:compose-auth:3.6.0")
-    implementation("io.github.jan-tennert.supabase:realtime-kt")
-    implementation("io.ktor:ktor-client-android:3.0.1")
-    implementation("io.ktor:ktor-client-core:3.0.1")
-    implementation("io.ktor:ktor-client-content-negotiation:3.0.1")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.1")
+    val supabaseVersion = "3.6.0"
+    val ktorVersion = "3.0.1"
+    // Supabase Core & Modules
+    implementation("io.github.jan-tennert.supabase:supabase-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:auth-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:storage-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:realtime-kt:${supabaseVersion}")
+    // Supabase Compose Auth Plugin
+    implementation("io.github.jan-tennert.supabase:compose-auth:${supabaseVersion}")
+    // Ktor Client
+    implementation("io.ktor:ktor-client-android:${ktorVersion}")
+    implementation("io.ktor:ktor-client-core:${ktorVersion}")
+    implementation("io.ktor:ktor-client-content-negotiation:${ktorVersion}")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:${ktorVersion}")
 }
