@@ -1,5 +1,6 @@
 package com.example.soundproof_okmic
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -14,6 +15,22 @@ import kotlinx.coroutines.launch
 *  VIEWMODEL FOR STORING CONFIGURATION SETTINGS AND MANAGING THE AUDIO STREAM
 */
 
+data class FullNoiseMeasurementData(
+    val timestamp: Long = 0L,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val avgDb: Float = 0.0f,
+    val spectrogram: List<Float> = emptyList()
+)
+
+data class DefaultConfiguration(
+    val bufferSize: Int = 2048,
+    val fWindowSize: Int = 2048,
+    val noiseGateEnabled: Boolean = true,
+    val noiseGateThreshold: Float = -50f,
+    val algo: String = "Blackman"
+)
+
 data class ConfigurationData(
     val bufferSize: Int = 1024,
     val fWindowSize: Int = 1024,
@@ -22,9 +39,15 @@ data class ConfigurationData(
     val algo: String = "Hann"
 )
 
+enum class Mode{
+    FREEROAM,
+    NOISETEST
+}
+
 data class AudioStream(
     val isRecording: Boolean = false,
-    val currentDb: Float = 0.0f,
+    val mode: Mode = Mode.FREEROAM,
+    val currentDb: Float = -80.0f,
     val maxDb: Float = -100.0f,
     val minDb:Float = 100.0f,
     val fourierResults: FloatArray = floatArrayOf(),
@@ -39,6 +62,7 @@ data class AudioStream(
         other as AudioStream
 
         if (isRecording != other.isRecording) return false
+        if (mode != other.mode) return false
         if (currentDb != other.currentDb) return false
         if (maxDb != other.maxDb) return false
         if (minDb != other.minDb) return false
@@ -51,6 +75,7 @@ data class AudioStream(
 
     override fun hashCode(): Int {
         var result = isRecording.hashCode()
+        result = 31 * result + mode.hashCode()
         result = 31 * result + currentDb.hashCode()
         result = 31 * result + maxDb.hashCode()
         result = 31 * result + minDb.hashCode()
@@ -68,6 +93,11 @@ class AudioManager : ViewModel() {
 
     private val _audioStream = MutableStateFlow(AudioStream())
     val audioStream: StateFlow<AudioStream> = _audioStream.asStateFlow()
+
+    private val _noiseTestResults = MutableStateFlow(FullNoiseMeasurementData())
+    val noiseTestResults: StateFlow<FullNoiseMeasurementData> = _noiseTestResults.asStateFlow()
+
+    private var noiseTestProcessor: NoiseTestProcessor = NoiseTestProcessor()
 
     private var recordingJob: Job? = null
     private val maxHistorySize = 100
@@ -118,17 +148,42 @@ class AudioManager : ViewModel() {
         _audioStream.update { it.copy(isRecording = active) }
     }
 
+    fun changeRecordingMode(mode: String) {
+        if(mode == "FREEROAM")
+        {
+            _audioStream.update { it.copy(mode = Mode.FREEROAM) }
+        }
+        if(mode == "NOISETEST")
+        {
+            _audioStream.update { it.copy(mode = Mode.NOISETEST) }
+        }
+    }
+
     fun startRecording() {
         if (recordingJob?.isActive == true) return
 
         openAudio()
-        setBufferSize(_configData.value.bufferSize)
-        setFWindowSize(_configData.value.fWindowSize)
-        setAlgo(_configData.value.algo)
-        if(_configData.value.noiseGateEnabled)
-        {
-            setNoiseThreshold(_configData.value.noiseGateThreshold)
+        if(_audioStream.value.mode == Mode.NOISETEST){
+            noiseTestProcessor = NoiseTestProcessor()
+            _noiseTestResults.update { FullNoiseMeasurementData() }
+            setBufferSize(DefaultConfiguration().bufferSize)
+            setFWindowSize(DefaultConfiguration().fWindowSize)
+            setAlgo(DefaultConfiguration().algo)
+            if(DefaultConfiguration().noiseGateEnabled) // always true, but kept for readability
+            {
+                setNoiseThreshold(DefaultConfiguration().noiseGateThreshold)
+            }
         }
+        else{
+            setBufferSize(_configData.value.bufferSize)
+            setFWindowSize(_configData.value.fWindowSize)
+            setAlgo(_configData.value.algo)
+            if(_configData.value.noiseGateEnabled)
+            {
+                setNoiseThreshold(_configData.value.noiseGateThreshold)
+            }
+        }
+
         startAudio()
         _audioStream.update {
             it.copy(
@@ -142,15 +197,35 @@ class AudioManager : ViewModel() {
         recordingJob = viewModelScope.launch {
             while (_audioStream.value.isRecording) {
                 updateAudioResults()
+                if(_audioStream.value.mode.name == "NOISETEST")
+                {
+                    updateMemory()
+                }
                 delay(100) // Update UI every 100ms
             }
         }
     }
 
-    fun stopRecording() {
+    fun stopRecording(currentLat: Double = 0.0, currentLon: Double = 0.0) {
         recordingJob?.cancel()
         stopAudio()
         _audioStream.update { it.copy(isRecording = false) }
+        Log.d("AudioManager", "Entering NOISETEST if statement.")
+        if(_audioStream.value.mode.name == "NOISETEST")
+        {
+            val results = noiseTestProcessor.getResults()
+            Log.d("AudioManager", "Current hasH: ${System.identityHashCode(this)}")
+            _noiseTestResults.update {
+                it.copy(
+                    timestamp = System.currentTimeMillis(),
+                    avgDb = results.avgDb,
+                    spectrogram = results.spectrogram.toList(),
+                    latitude = currentLat,
+                    longitude = currentLon
+                )
+            }
+            Log.d("AudioManager", "Stan _noiseTestResults zaktualizowany! Nowy timestamp: ${_noiseTestResults.value.timestamp}")
+        }
         reset()
     }
 
@@ -164,6 +239,15 @@ class AudioManager : ViewModel() {
             dbHistory = emptyList(),
             totalSamples = 0L
         ) }
+    }
+
+    fun updateMemory()
+    {
+        val currentFrame = NoiseFrame(
+            db = audioStream.value.currentDb,
+            fourier = audioStream.value.fourierResults
+        )
+        noiseTestProcessor.pushNoiseFrame(currentFrame)
     }
 
     fun updateAudioResults() {

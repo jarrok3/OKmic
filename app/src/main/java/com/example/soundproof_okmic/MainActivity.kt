@@ -1,9 +1,7 @@
 package com.example.soundproof_okmic
 
 import android.Manifest
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -26,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.ArrowDropDown
@@ -34,6 +33,7 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.SaveAs
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
@@ -79,8 +79,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlin.math.log10
-import kotlin.math.max
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -90,7 +88,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.serialization.Serializable
+import kotlin.math.log10
+import kotlin.math.max
 
 // For unified UI adjustments
 data object InScreenOffset{
@@ -99,13 +104,30 @@ data object InScreenOffset{
 }
 
 class MainActivity : ComponentActivity() {
+    // create a supabase Client
+    private val supabaseClient by lazy {
+        createSupabaseClient(
+            supabaseUrl = BuildConfig.SUPABASE_URL,
+            supabaseKey = BuildConfig.SUPABASE_PUBLISHABLE_KEY
+        ) {
+            install(Postgrest)
+        }
+    }
+
     // declare audioManager object to outlive the current activity
     private val audioManager by viewModels<AudioManager>()
+
+    private lateinit var databaseManager: DatabaseManager
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Init the database client object
+        databaseManager = DatabaseManager(
+            supabaseClient = supabaseClient,
+            audioManager = audioManager
+        )
         setContent {
             SoundProof_OKmicTheme {
                 val navController = rememberNavController()
@@ -115,13 +137,13 @@ class MainActivity : ComponentActivity() {
                 )
                 {
                     composable<AudioScreen>{
-                        MainLayout(navController = navController, modifier = Modifier.fillMaxSize())
+                        MainLayout(navController = navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MyCapturesScreen>{
-                        MyCapturesLayout(navController, modifier = Modifier.fillMaxSize())
+                        MyCapturesLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MapsScreen>{
-                        NoiseMapLayout(navController, modifier = Modifier.fillMaxSize())
+                        NoiseMapLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -132,19 +154,31 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         audioManager.stopRecording()
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        databaseManager.cleanup()
+    }
 }
 
 // === MAIN LAYOUT ===
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audioManager: AudioManager = viewModel())
 {
     val audioStream by audioManager.audioStream.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val isAudioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
+        val isFineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val isCoarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+        if (isAudioGranted && (isFineLocationGranted || isCoarseLocationGranted)) {
             audioManager.startRecording()
         } else {
             audioManager.changeRecordingState(false)
@@ -153,26 +187,59 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
 
     LaunchedEffect(audioStream.isRecording) {
         if (audioStream.isRecording) {
-            val hasPermission = ContextCompat.checkSelfPermission(
+            val hasAudioPermission = ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
+            val hasFineLocationPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasCoarseLocationPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
 
-            if (hasPermission) {
+            if (hasAudioPermission && (hasFineLocationPermission || hasCoarseLocationPermission)) {
                 audioManager.startRecording()
             } else {
-                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                permissionLauncher.launch(arrayOf(
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ))
             }
         } else {
-            audioManager.stopRecording()
+            val hasLocationPermission = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (hasLocationPermission) {
+                // Ask GPS for location when recording is stopped
+                fusedLocationClient.getCurrentLocation(
+                    Priority.PRIORITY_HIGH_ACCURACY,
+                    CancellationTokenSource().token
+                ).addOnSuccessListener { location ->
+                    if (location != null) {
+                        audioManager.stopRecording(location.latitude, location.longitude)
+                    } else {
+                        // In case of random errors getting location
+                        audioManager.stopRecording(0.0, 0.0)
+                    }
+                }.addOnFailureListener {
+                    audioManager.stopRecording(0.0, 0.0)
+                }
+            } else {
+                audioManager.stopRecording(0.0, 0.0)
+            }
         }
     }
 
     Scaffold(
         modifier = modifier,
-        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        topBar = { TopNavBar(navController, audioManager, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
-        floatingActionButton = { FloatingRecordButton(onRecordingChange = { audioManager.changeRecordingState(it) }) }
+        floatingActionButton = {}
     ) { innerPadding ->
         BoxWithConstraints(
             modifier = Modifier
@@ -190,9 +257,45 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
                 horizontalAlignment = Alignment.Start
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Current: ${audioStream.currentDb} [dB]")
-                Text("Loudest: ${audioStream.maxDb} [dB]")
-                Text("Lowest: ${audioStream.minDb} [dB]")
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    BoxWithConstraints(
+                        modifier = Modifier.width(this@BoxWithConstraints.maxWidth.value.dp/2)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                        ) {
+                            Text("Current: ${audioStream.currentDb} [dB]")
+                            Text("Loudest: ${audioStream.maxDb} [dB]")
+                            Text("Lowest: ${audioStream.minDb} [dB]")
+                        }
+                    }
+                    BoxWithConstraints(
+                        modifier = Modifier.width(this@BoxWithConstraints.maxWidth.value.dp/2),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth(),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            FloatingModeButton(
+                                audioStream = audioStream,
+                                onModeChange = { isRecording, mode ->
+                                    audioManager.changeRecordingState(isRecording)
+                                    audioManager.changeRecordingMode(mode)
+                                }
+                            )
+                            FloatingRecordButton(
+                                audioStream = audioStream,
+                                onRecordingChange = { audioManager.changeRecordingState(it) }
+                            )
+                        }
+                    }
+                }
+
                 HorizontalDivider(
                     modifier = Modifier
                         .padding(vertical = 16.dp)
@@ -209,7 +312,7 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
+fun TopNavBar(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier) {
     // Remember route
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -223,7 +326,7 @@ fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
 
     CenterAlignedTopAppBar(
         actions = {
-            DropDownMenu(navController, modifier = Modifier.padding(14.dp))
+            DropDownMenu(navController, audioManager = audioManager, modifier = Modifier.padding(14.dp))
         },
         title = { Text(title) },
         modifier = modifier,
@@ -237,15 +340,17 @@ fun TopNavBar(navController: NavController, modifier: Modifier = Modifier) {
 
 
 @Composable
-fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
+fun DropDownMenu(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier)
 {
+    val currentAudioMode by audioManager.audioStream.collectAsStateWithLifecycle()
     var expanded by remember {mutableStateOf(false)}
     var showSettings by remember {mutableStateOf(false)}
 
     if(showSettings)
     {
         SettingsDialogueWindow(
-            onDismiss = { showSettings = false }
+            onDismiss = { showSettings = false },
+            audioManager = audioManager
         )
     }
 
@@ -287,6 +392,7 @@ fun DropDownMenu(navController: NavController, modifier: Modifier = Modifier)
             DropdownMenuItem(
                 modifier = Modifier.fillMaxWidth(),
                 text = { Text("Settings") },
+                enabled = if(currentAudioMode.mode.name == "FREEROAM") true else false,
                 onClick = {
                     expanded = false
                     showSettings = true
@@ -366,21 +472,44 @@ fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
     }
 }
 
+// Used for toggling recording mode
 @Composable
-fun FloatingRecordButton(onRecordingChange: (Boolean) -> Unit, audioState: AudioManager = viewModel())
+fun FloatingModeButton(onModeChange: (Boolean, String) -> Unit, audioStream: AudioStream)
 {
-    val currentAudioStreamState by audioState.audioStream.collectAsStateWithLifecycle()
-
     Button(
         elevation = ButtonDefaults.elevatedButtonElevation(
             defaultElevation = 8.dp
         ),
         shape = ButtonDefaults.shape,
-        onClick = { onRecordingChange(!currentAudioStreamState.isRecording) },
+        onClick = {
+            val nextMode = if (audioStream.mode.name == "FREEROAM") "NOISETEST" else "FREEROAM"
+            onModeChange(false, nextMode)
+        },
         modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
     ) {
         Text(
-            text = if (currentAudioStreamState.isRecording) "STOP " else "REC "
+            text = if (audioStream.mode.name == "FREEROAM") "FREE" else "TEST"
+        )
+        Icon(
+            imageVector = Icons.Rounded.SaveAs,
+            contentDescription = "Modechange_audio"
+        )
+    }
+}
+
+@Composable
+fun FloatingRecordButton(onRecordingChange: (Boolean) -> Unit, audioStream: AudioStream)
+{
+    Button(
+        elevation = ButtonDefaults.elevatedButtonElevation(
+            defaultElevation = 8.dp
+        ),
+        shape = ButtonDefaults.shape,
+        onClick = { onRecordingChange(!audioStream.isRecording) },
+        modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
+    ) {
+        Text(
+            text = if (audioStream.isRecording) "STOP " else "REC "
         )
         Icon(
             imageVector = Icons.Rounded.FiberSmartRecord,
@@ -590,9 +719,13 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
 
 // === MY CAPTURES LAYOUT ===
 @Composable
-fun MyCapturesLayout(navController: NavController, modifier : Modifier = Modifier) {
+fun MyCapturesLayout(navController: NavController, audioManager: AudioManager, modifier : Modifier = Modifier) {
     Scaffold(
-        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        topBar = { TopNavBar(
+            navController,
+            audioManager = audioManager,
+            modifier = Modifier.fillMaxWidth())
+        },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
     ) { innerPadding ->
         Column(
@@ -609,9 +742,9 @@ fun MyCapturesLayout(navController: NavController, modifier : Modifier = Modifie
 
 // === NOISE MAP LAYOUT ===
 @Composable
-fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
+fun NoiseMapLayout(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier){
     Scaffold(
-        topBar = { TopNavBar(navController, Modifier.fillMaxWidth()) },
+        topBar = { TopNavBar(navController, audioManager, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
     ) { innerPadding ->
         Column(
@@ -629,7 +762,7 @@ fun NoiseMapLayout(navController: NavController, modifier: Modifier = Modifier){
 // === SETTINGS DIALOG MENU ===
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, audioManager: AudioManager = viewModel())
+fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier, audioManager: AudioManager)
 {
     // Get viewModel configSettings
     val currentConfigState by audioManager.configData.collectAsStateWithLifecycle()
@@ -830,6 +963,7 @@ fun SettingsDialogueWindow(onDismiss: () -> Unit, modifier: Modifier = Modifier,
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
+                        audioManager.stopRecording()
                         audioManager.setNoiseGateEnabled(isGateEnabled)
                         audioManager.setNoiseGateThreshold(sliderPosition)
                         audioManager.changeBufferSize(bufferSize)

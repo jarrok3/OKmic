@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -11,6 +13,21 @@ android {
             minorApiLevel = 1
         }
     }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    // Read from local.properties
+    val localProperties = Properties().apply {
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            localPropertiesFile.inputStream().use { load(it) }
+        }
+    }
+
+    val supabaseUrl = localProperties.getProperty("SUPABASE_URL") ?: ""
+    val supabaseKey = localProperties.getProperty("SUPABASE_PUBLISHABLE_KEY") ?: ""
 
     defaultConfig {
         applicationId = "com.example.soundproof_okmic"
@@ -26,6 +43,9 @@ android {
                 arguments("-DANDROID_STL=c++_shared")
             }
         }
+
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
     }
 
     externalNativeBuild {
@@ -80,4 +100,24 @@ dependencies {
 
     // OBOE
     implementation("com.google.oboe:oboe:1.10.0")
+
+    // Location services
+    implementation("com.google.android.gms:play-services-location:21.2.0")
+
+    // Supabase connection setup
+    val supabaseVersion = "3.6.0"
+    val ktorVersion = "3.0.1"
+    // Supabase Core & Modules
+    implementation("io.github.jan-tennert.supabase:supabase-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:auth-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:storage-kt:${supabaseVersion}")
+    implementation("io.github.jan-tennert.supabase:realtime-kt:${supabaseVersion}")
+    // Supabase Compose Auth Plugin
+    implementation("io.github.jan-tennert.supabase:compose-auth:${supabaseVersion}")
+    // Ktor Client
+    implementation("io.ktor:ktor-client-android:${ktorVersion}")
+    implementation("io.ktor:ktor-client-core:${ktorVersion}")
+    implementation("io.ktor:ktor-client-content-negotiation:${ktorVersion}")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:${ktorVersion}")
 }
