@@ -1,6 +1,7 @@
 package com.example.soundproof_okmic
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -90,6 +91,8 @@ import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.serialization.Serializable
 import kotlin.math.log10
 import kotlin.math.max
@@ -101,13 +104,30 @@ data object InScreenOffset{
 }
 
 class MainActivity : ComponentActivity() {
+    // create a supabase Client
+    private val supabaseClient by lazy {
+        createSupabaseClient(
+            supabaseUrl = "https://TWÓJ_PROJEKT.supabase.co",
+            supabaseKey = "TWÓJ_ANON_PUBLIC_KEY"
+        ) {
+            install(Postgrest)
+        }
+    }
+
     // declare audioManager object to outlive the current activity
     private val audioManager by viewModels<AudioManager>()
+
+    private lateinit var databaseManager: DatabaseManager
 
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Init the database client object
+        databaseManager = DatabaseManager(
+            supabaseClient = supabaseClient,
+            audioManager = audioManager
+        )
         setContent {
             SoundProof_OKmicTheme {
                 val navController = rememberNavController()
@@ -137,6 +157,7 @@ class MainActivity : ComponentActivity() {
 }
 
 // === MAIN LAYOUT ===
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audioManager: AudioManager = viewModel())
 {
