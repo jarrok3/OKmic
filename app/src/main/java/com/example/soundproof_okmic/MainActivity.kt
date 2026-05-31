@@ -278,12 +278,14 @@ fun MainLayout(modifier: Modifier = Modifier, navController: NavController, audi
                             horizontalAlignment = Alignment.End
                         ) {
                             FloatingModeButton(
+                                audioStream = audioStream,
                                 onModeChange = { isRecording, mode ->
                                     audioManager.changeRecordingState(isRecording)
                                     audioManager.changeRecordingMode(mode)
                                 }
                             )
                             FloatingRecordButton(
+                                audioStream = audioStream,
                                 onRecordingChange = { audioManager.changeRecordingState(it) }
                             )
                         }
@@ -467,23 +469,21 @@ fun BottomNavBar(navController: NavController, modifier: Modifier = Modifier)
 
 // Used for toggling recording mode
 @Composable
-fun FloatingModeButton(onModeChange: (Boolean, String) -> Unit, audioState: AudioManager = viewModel())
+fun FloatingModeButton(onModeChange: (Boolean, String) -> Unit, audioStream: AudioStream)
 {
-    val currentAudioStreamState by audioState.audioStream.collectAsStateWithLifecycle()
-
     Button(
         elevation = ButtonDefaults.elevatedButtonElevation(
             defaultElevation = 8.dp
         ),
         shape = ButtonDefaults.shape,
         onClick = {
-            val nextMode = if (currentAudioStreamState.mode.name == "FREEROAM") "NOISETEST" else "FREEROAM"
+            val nextMode = if (audioStream.mode.name == "FREEROAM") "NOISETEST" else "FREEROAM"
             onModeChange(false, nextMode)
         },
         modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
     ) {
         Text(
-            text = if (currentAudioStreamState.mode.name == "FREEROAM") "FREE" else "TEST"
+            text = if (audioStream.mode.name == "FREEROAM") "FREE" else "TEST"
         )
         Icon(
             imageVector = Icons.Rounded.SaveAs,
@@ -493,20 +493,18 @@ fun FloatingModeButton(onModeChange: (Boolean, String) -> Unit, audioState: Audi
 }
 
 @Composable
-fun FloatingRecordButton(onRecordingChange: (Boolean) -> Unit, audioState: AudioManager = viewModel())
+fun FloatingRecordButton(onRecordingChange: (Boolean) -> Unit, audioStream: AudioStream)
 {
-    val currentAudioStreamState by audioState.audioStream.collectAsStateWithLifecycle()
-
     Button(
         elevation = ButtonDefaults.elevatedButtonElevation(
             defaultElevation = 8.dp
         ),
         shape = ButtonDefaults.shape,
-        onClick = { onRecordingChange(!currentAudioStreamState.isRecording) },
+        onClick = { onRecordingChange(!audioStream.isRecording) },
         modifier = Modifier.offset(x= InScreenOffset.x, y = InScreenOffset.y)
     ) {
         Text(
-            text = if (currentAudioStreamState.isRecording) "STOP " else "REC "
+            text = if (audioStream.isRecording) "STOP " else "REC "
         )
         Icon(
             imageVector = Icons.Rounded.FiberSmartRecord,
