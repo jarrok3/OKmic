@@ -137,7 +137,7 @@ class MainActivity : ComponentActivity() {
                 )
                 {
                     composable<AudioScreen>{
-                        MainLayout(navController = navController, modifier = Modifier.fillMaxSize())
+                        MainLayout(navController = navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MyCapturesScreen>{
                         MyCapturesLayout(navController, modifier = Modifier.fillMaxSize())

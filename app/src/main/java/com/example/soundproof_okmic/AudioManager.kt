@@ -1,5 +1,6 @@
 package com.example.soundproof_okmic
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -205,9 +206,11 @@ class AudioManager : ViewModel() {
         recordingJob?.cancel()
         stopAudio()
         _audioStream.update { it.copy(isRecording = false) }
+        Log.d("AudioManager", "Entering NOISETEST if statement.")
         if(_audioStream.value.mode.name == "NOISETEST")
         {
             val results = noiseTestProcessor.getResults()
+            Log.d("AudioManager", "Current hasH: ${System.identityHashCode(this)}")
             _noiseTestResults.update {
                 it.copy(
                     timestamp = System.currentTimeMillis(),
@@ -217,6 +220,7 @@ class AudioManager : ViewModel() {
                     longitude = currentLon
                 )
             }
+            Log.d("AudioManager", "Stan _noiseTestResults zaktualizowany! Nowy timestamp: ${_noiseTestResults.value.timestamp}")
         }
         reset()
     }

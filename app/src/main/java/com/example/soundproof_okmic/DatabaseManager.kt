@@ -32,6 +32,7 @@ class DatabaseManager(
 
     private fun observeNoiseResults() {
         databaseScope.launch {
+            Log.d("DatabaseManager", "INIT DB done, watching over: ${System.identityHashCode(audioManager)}")
             audioManager.noiseTestResults
                 .filter { it.timestamp != 0L }
                 .distinctUntilChanged()
