@@ -14,10 +14,9 @@ import kotlinx.coroutines.cancel
 
 @Serializable
 data class NoiseMeasurementDto(
-    val timestamp: Long,
-    val latitude: Double,
-    val longitude: Double,
-    val avgDb: Float,
+    val timestamp_ms: Long,
+    val location: String,
+    val avg_db: Float,
     val spectrogram: List<Float>
 )
 
@@ -42,10 +41,9 @@ class DatabaseManager(
                         Log.d("DatabaseManager", "New measurement noticed, sending to supabase... Timestamp: ${measurementData.timestamp}")
 
                         val dto = NoiseMeasurementDto(
-                            timestamp = measurementData.timestamp,
-                            latitude = measurementData.latitude,
-                            longitude = measurementData.longitude,
-                            avgDb = measurementData.avgDb,
+                            timestamp_ms = measurementData.timestamp,
+                            location = "POINT(${measurementData.longitude} ${measurementData.latitude})",
+                            avg_db = measurementData.avgDb,
                             spectrogram = measurementData.spectrogram
                         )
 
