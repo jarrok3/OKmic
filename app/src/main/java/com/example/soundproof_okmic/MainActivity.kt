@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,9 +26,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FiberSmartRecord
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
@@ -39,8 +43,11 @@ import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,12 +76,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -94,6 +103,7 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.serialization.Serializable
+import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
 
@@ -140,7 +150,7 @@ class MainActivity : ComponentActivity() {
                         MainLayout(navController = navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MyCapturesScreen>{
-                        MyCapturesLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
+                        MyCapturesLayout(navController, audioManager = audioManager, databaseManager = databaseManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MapsScreen>{
                         NoiseMapLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
@@ -719,24 +729,234 @@ fun AudioCanvasFFT(isRecording: Boolean, fftResults: List<Float>)
 
 // === MY CAPTURES LAYOUT ===
 @Composable
-fun MyCapturesLayout(navController: NavController, audioManager: AudioManager, modifier : Modifier = Modifier) {
+fun MyCapturesLayout(
+    navController: NavController,
+    audioManager: AudioManager,
+    databaseManager: DatabaseManager,
+    modifier: Modifier = Modifier
+) {
+    // List for raw data retrieval from supabase
+    var measurementsList by remember { mutableStateOf<List<NoiseMeasurementDto>>(emptyList()) }
+    var isCheckingDb by remember { mutableStateOf(true) }
+
+    // Download data
+    LaunchedEffect(Unit) {
+        measurementsList = databaseManager.fetchAllMeasurements()
+        isCheckingDb = false
+    }
+
     Scaffold(
-        topBar = { TopNavBar(
-            navController,
-            audioManager = audioManager,
-            modifier = Modifier.fillMaxWidth())
-        },
+        topBar = { TopNavBar(navController, audioManager = audioManager, modifier = Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
+        Box(
+            modifier = modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Text(
-                text = "Dzień Dobry Polsko witam serdecznie!"
+            if (isCheckingDb) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(measurementsList) { item ->
+                        RawMeasurementRow(dto = item)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RawMeasurementRow(dto: NoiseMeasurementDto, onDelete: (NoiseMeasurementDto) -> Unit = {}) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Timestamp: ${dto.timestamp_ms}",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                IconButton(onClick = { onDelete(dto) }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = "Delete measurement",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            Text(text = "Location (WKT): ${dto.location}")
+            Text(text = "Average dB: ${dto.avg_db}")
+            Text(text = "Spectrogram samples: ${dto.spectrogram.size}")
+
+            // Spectrogram draw!
+            if (dto.spectrogram.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                        .background(Color.Black)
+                ) {
+                    SpectrogramDrawing(
+                        rawData = dto.spectrogram,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SpectrogramDrawing(
+    rawData: List<Float>,
+    fWindowSize: Int = 2048,
+    modifier: Modifier = Modifier
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = TextStyle(color = Color.Gray, fontSize = 10.sp)
+
+    Canvas(modifier = modifier) {
+        val totalWidth = size.width
+        val totalHeight = size.height
+
+        val paddingLeft = 55.dp.toPx()
+        val paddingBottom = 25.dp.toPx()
+
+        val graphWidth = totalWidth - paddingLeft
+        val graphHeight = totalHeight - paddingBottom
+
+        val frequencyBins = fWindowSize / 2
+        if (frequencyBins <= 0 || rawData.isEmpty()) return@Canvas
+
+        val timeSteps = rawData.size / frequencyBins
+        if (timeSteps <= 0) return@Canvas
+
+        val cellWidth = graphWidth / timeSteps
+
+        val minDb = -100f
+        val maxDb = -30f
+        val dbRange = maxDb - minDb
+
+        val maxHz = 24000.0
+        val logMaxHz = ln(maxHz + 1.0)
+
+        for (t in 0 until timeSteps) {
+            val xPos = paddingLeft + (t * cellWidth)
+
+            for (f in 0 until frequencyBins) {
+                val flatIndex = t * frequencyBins + f
+                if (flatIndex >= rawData.size) break
+
+                val db = rawData[flatIndex]
+                val intensity = ((db - minDb) / dbRange).coerceIn(0f, 1f)
+
+                val currentHz = (f.toDouble() / frequencyBins) * maxHz
+                val logCurrentHz = ln(currentHz + 1.0)
+                val yPos = graphHeight - ((logCurrentHz / logMaxHz).toFloat() * graphHeight)
+
+                val nextHz = ((f + 1).toDouble() / frequencyBins) * maxHz
+                val logNextHz = ln(nextHz + 1.0)
+                val nextYPos = graphHeight - ((logNextHz / logMaxHz).toFloat() * graphHeight)
+
+                val cellHeight = (yPos - nextYPos).coerceAtLeast(1f)
+                if (intensity > 0.05f) {
+                    drawRect(
+                        color = Color(
+                            red = intensity,
+                            green = intensity * 0.8f,
+                            blue = (1f - intensity) * 0.5f,
+                            alpha = 1f
+                        ),
+                        topLeft = Offset(xPos, nextYPos),
+                        size = Size(cellWidth + 0.5f, cellHeight + 0.5f)
+                    )
+                }
+            }
+        }
+
+        val freqLabels = listOf(
+            100 to "100 Hz",
+            500 to "500 Hz",
+            1000 to "1 kHz",
+            5000 to "5 kHz",
+            10000 to "10 kHz",
+            20000 to "20 kHz"
+        )
+
+        freqLabels.forEach { (hz, text) ->
+            val logCurrentHz = ln(hz.toDouble() + 1.0)
+            val normalizedY = (logCurrentHz / logMaxHz).toFloat().coerceIn(0f, 1f)
+            val yPos = graphHeight - (normalizedY * graphHeight)
+
+            drawLine(
+                color = Color.White.copy(alpha = 0.15f),
+                start = Offset(paddingLeft, yPos),
+                end = Offset(totalWidth, yPos),
+                strokeWidth = 1f
+            )
+
+            val textLayoutResult = textMeasurer.measure(text, style = labelStyle)
+            drawText(
+                textMeasurer = textMeasurer,
+                text = text,
+                style = labelStyle,
+                topLeft = Offset(
+                    x = paddingLeft - textLayoutResult.size.width - 8f,
+                    y = yPos - (textLayoutResult.size.height / 2f)
+                )
             )
         }
+
+        val totalSeconds = timeSteps / 10f
+        val stepIntervalSeconds = when {
+            totalSeconds <= 5 -> 1
+            totalSeconds <= 20 -> 2
+            else -> 5
+        }
+
+        for (sec in 0..totalSeconds.toInt() step stepIntervalSeconds) {
+            val correspondingTimeStep = sec * 10
+            if (correspondingTimeStep >= timeSteps) break
+
+            val xPos = paddingLeft + (correspondingTimeStep * cellWidth)
+
+            drawLine(
+                color = Color.White.copy(alpha = 0.1f),
+                start = Offset(xPos, 0f),
+                end = Offset(xPos, graphHeight),
+                strokeWidth = 1f
+            )
+
+            val text = "${sec}.0s"
+            val textLayoutResult = textMeasurer.measure(text, style = labelStyle)
+
+            drawText(
+                textMeasurer = textMeasurer,
+                text = text,
+                style = labelStyle,
+                topLeft = Offset(
+                    x = xPos - (textLayoutResult.size.width / 2f),
+                    y = graphHeight + 6f
+                )
+            )
+        }
+
+        drawLine(Color.Gray, Offset(paddingLeft, 0f), Offset(paddingLeft, graphHeight), 2f)
+        drawLine(Color.Gray, Offset(paddingLeft, graphHeight), Offset(totalWidth, graphHeight), 2f)
     }
 }
 

@@ -35,6 +35,7 @@ class DatabaseManager(
             Log.d("DatabaseManager", "INIT DB done, watching over: ${System.identityHashCode(audioManager)}")
             audioManager.noiseTestResults
                 .filter { it.timestamp != 0L }
+                .filter { it.spectrogram.isNotEmpty() }
                 .distinctUntilChanged()
                 .collect { measurementData ->
                     try {
@@ -55,6 +56,36 @@ class DatabaseManager(
                         Log.e("DatabaseManager", "Error when saving measurement to Supabase", e)
                     }
                 }
+        }
+    }
+
+    suspend fun fetchAllMeasurements(): List<NoiseMeasurementDto> {
+        return try {
+            // Get measurements by timestamp (from newest)
+            val response = supabaseClient.postgrest["noise_measurements"]
+                .select {
+                    order(column = "timestamp_ms", order = io.github.jan.supabase.postgrest.query.Order.DESCENDING)
+                }
+                .decodeList<NoiseMeasurementDto>()
+
+            Log.d("DatabaseManager", "Retrieved ${response.size} measurements.")
+            response
+        } catch (e: Exception) {
+            Log.e("DatabaseManager", "Error retrieving data from Supabase", e)
+            emptyList()
+        }
+    }
+
+    suspend fun deleteMeasurement(timestampMs: Long) {
+        try {
+            Log.d("DatabaseManager", "Deleting measurement with timestamp: $timestampMs")
+            supabaseClient.postgrest["noise_measurements"].delete {
+                filter {
+                    eq("timestamp_ms", timestampMs)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("DatabaseManager", "Error deleting measurement from Supabase", e)
         }
     }
 
