@@ -13,6 +13,24 @@ import com.mapbox.geojson.*
 import com.mapbox.mapboxsdk.geometry.LatLng
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+fun NoiseMeasurementDto.toReadableDate(): String {
+    return try {
+        // Tworzymy obiekt Date na podstawie milisekund
+        val date = Date(this.timestamp_ms)
+
+        // Definiujemy porządny format: Dzień.Miesiąc.Rok Godzina:Minuta:Sekunda
+        val formatter = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
+
+        formatter.format(date)
+    } catch (e: Exception) {
+        Log.e("DATE_DEBUG", "Failed to format timestamp: ${this.timestamp_ms}", e)
+        "Nieznana data" // W razie nieprzewidzianego błędu zwracamy bezpieczny tekst alternatywny
+    }
+}
 
 fun NoiseMeasurementDto.toLatLng(): LatLng? {
     return try {
