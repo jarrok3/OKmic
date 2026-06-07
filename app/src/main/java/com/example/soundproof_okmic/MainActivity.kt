@@ -132,6 +132,8 @@ import kotlinx.serialization.Serializable
 import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
+import com.mapbox.mapboxsdk.style.layers.LineLayer
+import com.mapbox.mapboxsdk.style.layers.FillLayer
 
 // For unified UI adjustments
 data object InScreenOffset{
@@ -1053,8 +1055,8 @@ fun NoiseMapLayout(
             }
         }
 
-        val buildingFeatures = buildings.mapNotNull { wkbToFeature(it.geometry) }
-        val streetFeatures = streets.mapNotNull { wkbToFeature(it.geometry) }
+        val buildingFeatures = buildings.mapNotNull { wkbToFeature(it.geom) }
+        val streetFeatures = streets.mapNotNull { wkbToFeature(it.geom) }
 
         val all = noiseFeatures + buildingFeatures + streetFeatures
 

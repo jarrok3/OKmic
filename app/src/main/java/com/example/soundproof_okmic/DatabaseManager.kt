@@ -16,41 +16,53 @@ import java.nio.ByteOrder
 
 fun NoiseMeasurementDto.toLatLng(): LatLng? {
     return try {
-        val cleaned = location
-            .trim()
-            .removePrefix("POINT(")
-            .removeSuffix(")")
-            .trim()
+        val loc = location.trim()
 
-        val parts = cleaned.split(" ")
+        // Przypadek 1: Jeśli format to WKT tekstowy np. "POINT(21.01 52.22)"
+        if (loc.startsWith("POINT", ignoreCase = true)) {
+            val cleaned = loc.removePrefix("POINT(").removePrefix("point(").removeSuffix(")").trim()
+            val parts = cleaned.split(" ")
+            val lon = parts[0].toDoubleOrNull()
+            val lat = parts[1].toDoubleOrNull()
+            if (lon != null && lat != null) return LatLng(lat, lon)
+        }
+        // Przypadek 2: Jeśli baza zwraca Hex EWKB (np. "0101000020E6...")
+        else if (loc.matches(Regex("^[0-9a-fA-F]+$"))) {
+            val bytes = hexToBytes(loc)
+            val buffer = ByteBuffer.wrap(bytes)
 
-        if (parts.size != 2) {
-            Log.e("GEO_DEBUG", "Invalid POINT format: $location")
-            return null
+            // Określenie kolejności bajtów (Little vs Big Endian)
+            buffer.order(
+                if (buffer.get().toInt() == 0) ByteOrder.BIG_ENDIAN
+                else ByteOrder.LITTLE_ENDIAN
+            )
+
+            val geomType = buffer.int
+            val hasSrid = (geomType and 0x20000000) != 0 // Flaga EWKB informująca o obecności SRID
+            val actualType = geomType and 0xFFFFFF
+
+            // Jeśli jest SRID, musimy pominąć 4 bajty, aby nie popsuć odczytu koordynatów
+            if (hasSrid) {
+                buffer.int
+            }
+
+            if (actualType == 1) { // Typ 1 = Point
+                val lon = buffer.double
+                val lat = buffer.double
+                return LatLng(lat, lon)
+            }
         }
 
-        val lon = parts[0].toDoubleOrNull()
-        val lat = parts[1].toDoubleOrNull()
-
-        if (lon == null || lat == null) {
-            Log.e("GEO_DEBUG", "NaN coords in: $location")
-            return null
-        }
-
-        LatLng(lat, lon)
+        Log.e("GEO_DEBUG", "Unrecognized location format: $location")
+        null
     } catch (e: Exception) {
-        Log.e("GEO_DEBUG", "Failed parsing POINT: $location", e)
+        Log.e("GEO_DEBUG", "Failed parsing location: $location", e)
         null
     }
 }
 
 fun hexToBytes(hex: String): ByteArray {
-    // Handle PostGIS EWKB format which might include SRID (e.g., "SRID=4326;0101...")
-    val clean = if (hex.contains(";")) {
-        hex.substringAfter(";")
-    } else {
-        hex.removePrefix("SRID=").substringAfter(",")
-    }
+    val clean = hex.removePrefix("SRID=").substringAfter(",")
     val len = clean.length
     val data = ByteArray(len / 2)
 
@@ -78,27 +90,39 @@ fun wkbToFeature(
     properties: Map<String, Any> = emptyMap()
 ): Feature? {
     return try {
-
         val bytes = hexToBytes(hex)
         val buffer = ByteBuffer.wrap(bytes)
 
+        // Odczytanie byte-order (Big vs Little Endian)
         buffer.order(
             if (buffer.get().toInt() == 0) ByteOrder.BIG_ENDIAN
             else ByteOrder.LITTLE_ENDIAN
         )
 
-        val geomType = buffer.int and 0xFFFFFF
+        // Pobranie surowego typu geometrii (zawiera flagi PostGIS, np. obecność SRID)
+        val geomTypeRaw = buffer.int
+
+        // Sprawdzenie, czy ustawiony jest bit odpowiadający za obecność SRID (0x20000000)
+        val hasSrid = (geomTypeRaw and 0x20000000) != 0
+
+        // Wyczyszczenie flag, aby uzyskać czysty typ geometrii (1 = Point, 2 = LineString, 3 = Polygon)
+        val geomType = geomTypeRaw and 0xFFFFFF
+
+        // Kluczowa poprawka: Jeśli geometria zawiera SRID, pomijamy te 4 bajty,
+        // aby wskaźnik bufora trafił dokładnie na początek danych koordynatów
+        if (hasSrid) {
+            buffer.int
+        }
 
         val feature = when (geomType) {
-
-            // POINT
+            // 1 -> POINT
             1 -> {
                 val x = buffer.double
                 val y = buffer.double
                 Feature.fromGeometry(Point.fromLngLat(x, y))
             }
 
-            // LINESTRING
+            // 2 -> LINESTRING
             2 -> {
                 val numPoints = buffer.int
                 val points = mutableListOf<Point>()
@@ -112,7 +136,7 @@ fun wkbToFeature(
                 Feature.fromGeometry(LineString.fromLngLats(points))
             }
 
-            // POLYGON
+            // 3 -> POLYGON
             3 -> {
                 val numRings = buffer.int
                 val rings = mutableListOf<List<Point>>()
@@ -153,14 +177,17 @@ fun wkbToFeature(
 // =======================
 @Serializable
 data class BuildingDto(
-    val id: Long,
-    val geometry: String
+    val osm_id: Long,
+    val building: String?,
+    val geom: String
 )
 
 @Serializable
 data class StreetDto(
-    val id: Long,
-    val geometry: String
+    val osm_id: Long,
+    val name: String?,
+    val highway: String?,
+    val geom: String
 )
 
 @Serializable
