@@ -11,6 +11,25 @@ import android.util.Log
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.cancel
+import com.mapbox.mapboxsdk.geometry.LatLng
+
+fun NoiseMeasurementDto.toLatLng(): LatLng? {
+    try {
+        val coords = location
+            .removePrefix("POINT(")
+            .removeSuffix(")")
+            .split(" ")
+
+        if (coords.size == 2) {
+            val longitude = coords[0].toDouble()
+            val latitude = coords[1].toDouble()
+            return LatLng(latitude, longitude)
+        }
+    } catch (e: Exception) {
+        Log.e("DatabaseManager", "Error parsing location string: $location", e)
+    }
+    return null
+}
 
 @Serializable
 data class NoiseMeasurementDto(

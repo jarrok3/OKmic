@@ -104,6 +104,7 @@ dependencies {
 
     // Location services
     implementation("com.google.android.gms:play-services-location:21.2.0")
+    implementation("org.maplibre.gl:android-sdk:10.0.2")
 
     // Supabase connection setup
     val supabaseVersion = "3.6.0"

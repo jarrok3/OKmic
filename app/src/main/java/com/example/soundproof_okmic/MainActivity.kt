@@ -65,18 +65,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -84,8 +87,12 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -100,6 +107,24 @@ import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
+import com.mapbox.geojson.Point
+import com.mapbox.mapboxsdk.Mapbox
+import com.mapbox.mapboxsdk.camera.CameraPosition
+import com.mapbox.mapboxsdk.geometry.LatLng
+import com.mapbox.mapboxsdk.maps.MapView
+import com.mapbox.mapboxsdk.maps.Style
+import com.mapbox.mapboxsdk.style.expressions.Expression.color
+import com.mapbox.mapboxsdk.style.expressions.Expression.get
+import com.mapbox.mapboxsdk.style.expressions.Expression.has
+import com.mapbox.mapboxsdk.style.expressions.Expression.not
+import com.mapbox.mapboxsdk.style.expressions.Expression.step
+import com.mapbox.mapboxsdk.style.expressions.Expression.stop
+import com.mapbox.mapboxsdk.style.layers.CircleLayer
+import com.mapbox.mapboxsdk.style.layers.PropertyFactory
+import com.mapbox.mapboxsdk.style.layers.SymbolLayer
+import com.mapbox.mapboxsdk.style.sources.GeoJsonSource
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.serialization.Serializable
@@ -132,6 +157,8 @@ class MainActivity : ComponentActivity() {
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Init maps client
+        Mapbox.getInstance(this)
         enableEdgeToEdge()
         // Init the database client object
         databaseManager = DatabaseManager(
@@ -153,7 +180,7 @@ class MainActivity : ComponentActivity() {
                         MyCapturesLayout(navController, audioManager = audioManager, databaseManager = databaseManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MapsScreen>{
-                        NoiseMapLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
+                        NoiseMapLayout(navController, audioManager = audioManager, databaseManager = databaseManager, modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -962,18 +989,148 @@ fun SpectrogramDrawing(
 
 // === NOISE MAP LAYOUT ===
 @Composable
-fun NoiseMapLayout(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier){
+fun NoiseMapLayout(
+    navController: NavController,
+    audioManager: AudioManager,
+    databaseManager: DatabaseManager,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val warsawCenter = LatLng(52.2297, 21.0122)
+    val mapView = remember { MapView(context) }
+    val scope = rememberCoroutineScope() // Do asynchronicznych operacji poza LaunchedEffect
+
+    // Stan przechowujący surowe dane z bazy (DTO)
+    var measurementsList by remember { mutableStateOf<List<NoiseMeasurementDto>>(emptyList()) }
+
+    // --- 1. Obsługa Cyklu Życia (Lifecycle) - Bez zmian, wymagane ---
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_CREATE -> mapView.onCreate(null)
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // --- 2. KLUCZOWE: Pobieranie danych z Supabase ---
+    // Uruchamia się tylko raz, przy wejściu na ten ekran
+    LaunchedEffect(Unit) {
+        measurementsList = databaseManager.fetchAllMeasurements()
+    }
+
+    // --- 3. KLUCZOWE: Renderowanie danych na mapie po ich pobraniu ---
+    // LaunchedEffect uruchomi się asynchronicznie, gdy tylko mapa się zainicjuje
+    // AND gdy `measurementsList` przestanie być pusta.
+    LaunchedEffect(measurementsList) {
+        if (measurementsList.isEmpty()) return@LaunchedEffect
+
+        // Konwertujemy DTO na GeoJSON Features
+        val features = measurementsList.mapNotNull { dto ->
+            // Używamy funkcjiutility z Kroku 3
+            val latLng = dto.toLatLng() ?: return@mapNotNull null
+
+            // Tworzymy GeoJSON Point
+            val point = Point.fromLngLat(latLng.longitude, latLng.latitude)
+
+            // Tworzymy Feature, dodając AvgDb jako właściwość (do kolorowania)
+            Feature.fromGeometry(point).apply {
+                addNumberProperty("avg_db", dto.avg_db)
+            }
+        }
+        val featureCollection = FeatureCollection.fromFeatures(features)
+
+        // Czekamy na asynchroniczną mapę i styl
+        mapView.getMapAsync { map ->
+            map.setStyle(Style.Builder().fromUri("https://demotiles.maplibre.org/style.json")) { style ->
+
+                val sourceId = "noise-measurements-source"
+                val source = GeoJsonSource(sourceId, featureCollection,
+                    com.mapbox.mapboxsdk.style.sources.GeoJsonOptions()
+                        .withCluster(true)
+                        .withClusterMaxZoom(14)
+                        .withClusterRadius(50)
+                )
+                style.addSource(source)
+
+                // 1. Warstwa pojedynczych punktów
+                val pointLayer = CircleLayer("noise-points-layer", sourceId)
+                pointLayer.setProperties(
+                    PropertyFactory.circleRadius(8f),
+                    PropertyFactory.circleColor(
+                        step(get("avg_db"),
+                            color(Color.Green.toArgb()),
+                            stop(50.0, color(Color.Yellow.toArgb())),
+                            stop(80.0, color(Color.Red.toArgb()))
+                        )
+                    ),
+                    PropertyFactory.circleStrokeWidth(2f),
+                    PropertyFactory.circleStrokeColor(color(Color.White.toArgb()))
+                )
+                // UŻYWAMY FILTRA: Pokazuj ten punkt TYLKO jeśli NIE JEST klastrem
+                pointLayer.setFilter(not(has("point_count")))
+
+                // 2. Warstwa tła (kółka) dla klastra
+                val clusterCircleLayer = CircleLayer("noise-clusters-circle-layer", sourceId)
+                clusterCircleLayer.setProperties(
+                    PropertyFactory.circleRadius(18f),
+                    PropertyFactory.circleColor(color(Color.LightGray.toArgb())),
+                    PropertyFactory.circleStrokeWidth(1f),
+                    PropertyFactory.circleStrokeColor(color(Color.Gray.toArgb()))
+                )
+                // UŻYWAMY FILTRA: Pokazuj TYLKO jeśli JEST klastrem
+                clusterCircleLayer.setFilter(has("point_count"))
+
+                // 3. Warstwa tekstu (liczba) dla klastra
+                val clusterLayer = SymbolLayer("noise-clusters-layer", sourceId)
+                clusterLayer.setProperties(
+                    PropertyFactory.textField(get("point_count_abbreviated")),
+                    PropertyFactory.textColor(color(Color.Black.toArgb())),
+                    PropertyFactory.textSize(12f),
+                    PropertyFactory.textAllowOverlap(true)
+                )
+                // UŻYWAMY FILTRA: Pokazuj TYLKO jeśli JEST klastrem
+                clusterLayer.setFilter(has("point_count"))
+
+                // Dodanie warstw do mapy
+                style.addLayer(clusterCircleLayer)
+                style.addLayer(clusterLayer)
+                style.addLayer(pointLayer)
+            }
+        }
+    }
+
     Scaffold(
         topBar = { TopNavBar(navController, audioManager, Modifier.fillMaxWidth()) },
-        bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
+        bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
+        modifier = modifier
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Text(
-                text = "Dzień Dobry Polsko witam serdecznie!"
+            AndroidView(
+                factory = {
+                    // W factory tylko inicjalizujemy kamerę i zwracamy mapView.
+                    // Konfiguracja GeoJSON i stylu dzieje się asynchronicznie w LaunchedEffect.
+                    mapView.getMapAsync { map ->
+                        map.cameraPosition = CameraPosition.Builder()
+                            .target(warsawCenter)
+                            .zoom(12.0)
+                            .build()
+                    }
+                    mapView
+                },
+                modifier = Modifier.fillMaxSize()
             )
         }
     }
