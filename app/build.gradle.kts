@@ -28,6 +28,7 @@ android {
 
     val supabaseUrl = localProperties.getProperty("SUPABASE_URL") ?: ""
     val supabaseKey = localProperties.getProperty("SUPABASE_PUBLISHABLE_KEY") ?: ""
+    val maptilerKey = localProperties.getProperty("MAPTILER_PUBLIC_KEY") ?: ""
 
     defaultConfig {
         applicationId = "com.example.soundproof_okmic"
@@ -46,6 +47,7 @@ android {
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
+        buildConfigField("String", "MAPTILER_PUBLIC_KEY", "\"$maptilerKey\"")
     }
 
     externalNativeBuild {
@@ -104,6 +106,7 @@ dependencies {
 
     // Location services
     implementation("com.google.android.gms:play-services-location:21.2.0")
+    implementation("org.maplibre.gl:android-sdk:10.0.2")
 
     // Supabase connection setup
     val supabaseVersion = "3.6.0"

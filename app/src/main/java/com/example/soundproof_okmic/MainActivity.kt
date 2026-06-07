@@ -1,6 +1,7 @@
 package com.example.soundproof_okmic
 
 import android.Manifest
+import android.util.Log
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -65,18 +66,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -84,8 +88,12 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -100,12 +108,32 @@ import com.example.soundproof_okmic.ui.theme.SoundProof_OKmicTheme
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
+import com.mapbox.geojson.Point
+import com.mapbox.mapboxsdk.Mapbox
+import com.mapbox.mapboxsdk.camera.CameraPosition
+import com.mapbox.mapboxsdk.geometry.LatLng
+import com.mapbox.mapboxsdk.maps.MapView
+import com.mapbox.mapboxsdk.maps.Style
+import com.mapbox.mapboxsdk.style.expressions.Expression.color
+import com.mapbox.mapboxsdk.style.expressions.Expression.get
+import com.mapbox.mapboxsdk.style.expressions.Expression.has
+import com.mapbox.mapboxsdk.style.expressions.Expression.not
+import com.mapbox.mapboxsdk.style.expressions.Expression.step
+import com.mapbox.mapboxsdk.style.expressions.Expression.stop
+import com.mapbox.mapboxsdk.style.layers.CircleLayer
+import com.mapbox.mapboxsdk.style.layers.PropertyFactory
+import com.mapbox.mapboxsdk.style.layers.SymbolLayer
+import com.mapbox.mapboxsdk.style.sources.GeoJsonSource
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.serialization.Serializable
 import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
+import com.mapbox.mapboxsdk.style.layers.LineLayer
+import com.mapbox.mapboxsdk.style.layers.FillLayer
 
 // For unified UI adjustments
 data object InScreenOffset{
@@ -132,6 +160,8 @@ class MainActivity : ComponentActivity() {
     // Main
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Init maps client
+        Mapbox.getInstance(this)
         enableEdgeToEdge()
         // Init the database client object
         databaseManager = DatabaseManager(
@@ -153,7 +183,7 @@ class MainActivity : ComponentActivity() {
                         MyCapturesLayout(navController, audioManager = audioManager, databaseManager = databaseManager, modifier = Modifier.fillMaxSize())
                     }
                     composable<MapsScreen>{
-                        NoiseMapLayout(navController, audioManager = audioManager, modifier = Modifier.fillMaxSize())
+                        NoiseMapLayout(navController, audioManager = audioManager, databaseManager = databaseManager, modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -960,20 +990,177 @@ fun SpectrogramDrawing(
     }
 }
 
-// === NOISE MAP LAYOUT ===
 @Composable
-fun NoiseMapLayout(navController: NavController, audioManager: AudioManager, modifier: Modifier = Modifier){
+fun NoiseMapLayout(
+    navController: NavController,
+    audioManager: AudioManager,
+    databaseManager: DatabaseManager,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val warsawCenter = LatLng(52.2297, 21.0122)
+
+    val mapView = remember { MapView(context) }
+
+    // Usunięto: zmienne stanu dla buildings i streets
+    var measurementsList by remember { mutableStateOf<List<NoiseMeasurementDto>>(emptyList()) }
+
+    var featureCollection by remember { mutableStateOf<FeatureCollection?>(null) }
+
+    var geoJsonSourceRef by remember { mutableStateOf<GeoJsonSource?>(null) }
+    var mapStyleRef by remember { mutableStateOf<com.mapbox.mapboxsdk.maps.Style?>(null) }
+
+    // -------------------------
+    // LIFECYCLE
+    // -------------------------
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_CREATE -> mapView.onCreate(null)
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // -------------------------
+    // LOAD DATA
+    // -------------------------
+    LaunchedEffect(Unit) {
+        // Pobieramy wyłącznie pomiary hałasu
+        measurementsList = databaseManager.fetchAllMeasurements()
+    }
+
+    // -------------------------
+    // BUILD GEOJSON
+    // -------------------------
+    // Usunięto zależności od buildings i streets
+    LaunchedEffect(measurementsList) {
+        val noiseFeatures = measurementsList.mapNotNull { dto ->
+            val latLng = dto.toLatLng() ?: return@mapNotNull null
+
+            Feature.fromGeometry(
+                Point.fromLngLat(latLng.longitude, latLng.latitude)
+            ).apply {
+                addNumberProperty("avg_db", dto.avg_db)
+            }
+        }
+
+        // Zbiór punktów zawiera tylko Twoje pomiary
+        featureCollection = FeatureCollection.fromFeatures(noiseFeatures)
+
+        Log.d("GEO_DEBUG", "FINAL NOISE FEATURES: ${noiseFeatures.size}")
+    }
+
+    // -------------------------
+    // UI
+    // -------------------------
     Scaffold(
         topBar = { TopNavBar(navController, audioManager, Modifier.fillMaxWidth()) },
-        bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) }
+        bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
+        modifier = modifier
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
+
+        Box(
+            Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Text(
-                text = "Dzień Dobry Polsko witam serdecznie!"
+
+            AndroidView(
+                factory = {
+
+                    mapView.apply {
+
+                        getMapAsync { map ->
+
+                            map.cameraPosition = CameraPosition.Builder()
+                                .target(warsawCenter)
+                                .zoom(11.0)
+                                .build()
+
+                            // PODMIENIONY STYL MAPY NA BARDZIEJ SZCZEGÓŁOWY
+                            map.setStyle(
+                                Style.Builder()
+                                    .fromUri("https://api.maptiler.com/maps/dataviz-dark/style.json?key=${BuildConfig.MAPTILER_PUBLIC_KEY}")
+                            ) { style ->
+
+                                mapStyleRef = style
+
+                                val source = GeoJsonSource(
+                                    "noise-source",
+                                    FeatureCollection.fromFeatures(emptyList()),
+                                    com.mapbox.mapboxsdk.style.sources.GeoJsonOptions()
+                                        .withCluster(true)
+                                        .withClusterRadius(60)
+                                        .withClusterMaxZoom(14)
+                                )
+
+                                style.addSource(source)
+                                geoJsonSourceRef = source
+
+                                // -------------------------
+                                // LAYERS (konfiguracja klastrów i punktów)
+                                // -------------------------
+
+                                val pointLayer = CircleLayer("noise-points", "noise-source")
+                                pointLayer.setProperties(
+                                    PropertyFactory.circleRadius(7f),
+                                    PropertyFactory.circleColor(
+                                        step(
+                                            get("avg_db"),
+                                            color(Color.Green.toArgb()),
+                                            stop(50.0, color(Color.Yellow.toArgb())),
+                                            stop(80.0, color(Color.Red.toArgb()))
+                                        )
+                                    )
+                                )
+                                pointLayer.setFilter(has("avg_db"))
+
+                                val clusterLayer = CircleLayer("clusters", "noise-source")
+                                clusterLayer.setProperties(
+                                    PropertyFactory.circleRadius(18f),
+                                    PropertyFactory.circleColor(color(Color.Gray.toArgb()))
+                                )
+                                clusterLayer.setFilter(has("point_count"))
+
+                                val clusterText = SymbolLayer("cluster-text", "noise-source")
+                                clusterText.setProperties(
+                                    PropertyFactory.textField(get("point_count_abbreviated")),
+                                    PropertyFactory.textSize(12f),
+                                    PropertyFactory.textColor(color(Color.White.toArgb()))
+                                )
+                                clusterText.setFilter(has("point_count"))
+
+                                style.addLayer(clusterLayer)
+                                style.addLayer(clusterText)
+                                style.addLayer(pointLayer)
+
+                                // FIRST DATA PUSH
+                                featureCollection?.let {
+                                    source.setGeoJson(it)
+                                }
+                            }
+                        }
+                    }
+                },
+                update = {
+                    val source = geoJsonSourceRef
+                    val fc = featureCollection
+
+                    if (source != null && fc != null) {
+                        Log.d("MAP_DEBUG", "Updating GeoJSON: ${fc.features()?.size}")
+                        source.setGeoJson(fc)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
             )
         }
     }
