@@ -1,6 +1,7 @@
 package com.example.soundproof_okmic
 
 import android.Manifest
+import android.util.Log
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -987,7 +988,6 @@ fun SpectrogramDrawing(
     }
 }
 
-// === NOISE MAP LAYOUT ===
 @Composable
 fun NoiseMapLayout(
     navController: NavController,
@@ -997,13 +997,21 @@ fun NoiseMapLayout(
 ) {
     val context = LocalContext.current
     val warsawCenter = LatLng(52.2297, 21.0122)
-    val mapView = remember { MapView(context) }
-    val scope = rememberCoroutineScope() // Do asynchronicznych operacji poza LaunchedEffect
 
-    // Stan przechowujący surowe dane z bazy (DTO)
+    val mapView = remember { MapView(context) }
+
+    var buildings by remember { mutableStateOf<List<BuildingDto>>(emptyList()) }
+    var streets by remember { mutableStateOf<List<StreetDto>>(emptyList()) }
     var measurementsList by remember { mutableStateOf<List<NoiseMeasurementDto>>(emptyList()) }
 
-    // --- 1. Obsługa Cyklu Życia (Lifecycle) - Bez zmian, wymagane ---
+    var featureCollection by remember { mutableStateOf<FeatureCollection?>(null) }
+
+    var geoJsonSourceRef by remember { mutableStateOf<GeoJsonSource?>(null) }
+    var mapStyleRef by remember { mutableStateOf<com.mapbox.mapboxsdk.maps.Style?>(null) }
+
+    // -------------------------
+    // LIFECYCLE
+    // -------------------------
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -1021,114 +1029,139 @@ fun NoiseMapLayout(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // --- 2. KLUCZOWE: Pobieranie danych z Supabase ---
-    // Uruchamia się tylko raz, przy wejściu na ten ekran
+    // -------------------------
+    // LOAD DATA
+    // -------------------------
     LaunchedEffect(Unit) {
         measurementsList = databaseManager.fetchAllMeasurements()
+        buildings = databaseManager.fetchBuildings()
+        streets = databaseManager.fetchStreets()
     }
 
-    // --- 3. KLUCZOWE: Renderowanie danych na mapie po ich pobraniu ---
-    // LaunchedEffect uruchomi się asynchronicznie, gdy tylko mapa się zainicjuje
-    // AND gdy `measurementsList` przestanie być pusta.
-    LaunchedEffect(measurementsList) {
-        if (measurementsList.isEmpty()) return@LaunchedEffect
+    // -------------------------
+    // BUILD GEOJSON (OK)
+    // -------------------------
+    LaunchedEffect(measurementsList, buildings, streets) {
 
-        // Konwertujemy DTO na GeoJSON Features
-        val features = measurementsList.mapNotNull { dto ->
-            // Używamy funkcjiutility z Kroku 3
+        val noiseFeatures = measurementsList.mapNotNull { dto ->
             val latLng = dto.toLatLng() ?: return@mapNotNull null
 
-            // Tworzymy GeoJSON Point
-            val point = Point.fromLngLat(latLng.longitude, latLng.latitude)
-
-            // Tworzymy Feature, dodając AvgDb jako właściwość (do kolorowania)
-            Feature.fromGeometry(point).apply {
+            Feature.fromGeometry(
+                Point.fromLngLat(latLng.longitude, latLng.latitude)
+            ).apply {
                 addNumberProperty("avg_db", dto.avg_db)
             }
         }
-        val featureCollection = FeatureCollection.fromFeatures(features)
 
-        // Czekamy na asynchroniczną mapę i styl
-        mapView.getMapAsync { map ->
-            map.setStyle(Style.Builder().fromUri("https://demotiles.maplibre.org/style.json")) { style ->
+        val buildingFeatures = buildings.mapNotNull { wkbToFeature(it.geometry) }
+        val streetFeatures = streets.mapNotNull { wkbToFeature(it.geometry) }
 
-                val sourceId = "noise-measurements-source"
-                val source = GeoJsonSource(sourceId, featureCollection,
-                    com.mapbox.mapboxsdk.style.sources.GeoJsonOptions()
-                        .withCluster(true)
-                        .withClusterMaxZoom(14)
-                        .withClusterRadius(50)
-                )
-                style.addSource(source)
+        val all = noiseFeatures + buildingFeatures + streetFeatures
 
-                // 1. Warstwa pojedynczych punktów
-                val pointLayer = CircleLayer("noise-points-layer", sourceId)
-                pointLayer.setProperties(
-                    PropertyFactory.circleRadius(8f),
-                    PropertyFactory.circleColor(
-                        step(get("avg_db"),
-                            color(Color.Green.toArgb()),
-                            stop(50.0, color(Color.Yellow.toArgb())),
-                            stop(80.0, color(Color.Red.toArgb()))
-                        )
-                    ),
-                    PropertyFactory.circleStrokeWidth(2f),
-                    PropertyFactory.circleStrokeColor(color(Color.White.toArgb()))
-                )
-                // UŻYWAMY FILTRA: Pokazuj ten punkt TYLKO jeśli NIE JEST klastrem
-                pointLayer.setFilter(not(has("point_count")))
+        featureCollection = FeatureCollection.fromFeatures(all)
 
-                // 2. Warstwa tła (kółka) dla klastra
-                val clusterCircleLayer = CircleLayer("noise-clusters-circle-layer", sourceId)
-                clusterCircleLayer.setProperties(
-                    PropertyFactory.circleRadius(18f),
-                    PropertyFactory.circleColor(color(Color.LightGray.toArgb())),
-                    PropertyFactory.circleStrokeWidth(1f),
-                    PropertyFactory.circleStrokeColor(color(Color.Gray.toArgb()))
-                )
-                // UŻYWAMY FILTRA: Pokazuj TYLKO jeśli JEST klastrem
-                clusterCircleLayer.setFilter(has("point_count"))
-
-                // 3. Warstwa tekstu (liczba) dla klastra
-                val clusterLayer = SymbolLayer("noise-clusters-layer", sourceId)
-                clusterLayer.setProperties(
-                    PropertyFactory.textField(get("point_count_abbreviated")),
-                    PropertyFactory.textColor(color(Color.Black.toArgb())),
-                    PropertyFactory.textSize(12f),
-                    PropertyFactory.textAllowOverlap(true)
-                )
-                // UŻYWAMY FILTRA: Pokazuj TYLKO jeśli JEST klastrem
-                clusterLayer.setFilter(has("point_count"))
-
-                // Dodanie warstw do mapy
-                style.addLayer(clusterCircleLayer)
-                style.addLayer(clusterLayer)
-                style.addLayer(pointLayer)
-            }
-        }
+        Log.d("GEO_DEBUG", "FINAL FEATURES: ${all.size}")
     }
 
+    // -------------------------
+    // UI
+    // -------------------------
     Scaffold(
         topBar = { TopNavBar(navController, audioManager, Modifier.fillMaxWidth()) },
         bottomBar = { BottomNavBar(navController, Modifier.fillMaxWidth()) },
         modifier = modifier
     ) { innerPadding ->
+
         Box(
-            modifier = Modifier
+            Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+
             AndroidView(
                 factory = {
-                    // W factory tylko inicjalizujemy kamerę i zwracamy mapView.
-                    // Konfiguracja GeoJSON i stylu dzieje się asynchronicznie w LaunchedEffect.
-                    mapView.getMapAsync { map ->
-                        map.cameraPosition = CameraPosition.Builder()
-                            .target(warsawCenter)
-                            .zoom(12.0)
-                            .build()
+
+                    mapView.apply {
+
+                        getMapAsync { map ->
+
+                            map.cameraPosition = CameraPosition.Builder()
+                                .target(warsawCenter)
+                                .zoom(11.0)
+                                .build()
+
+                            map.setStyle(
+                                Style.Builder()
+                                    .fromUri("https://demotiles.maplibre.org/style.json")
+                            ) { style ->
+
+                                mapStyleRef = style
+
+                                val source = GeoJsonSource(
+                                    "noise-source",
+                                    FeatureCollection.fromFeatures(emptyList()),
+                                    com.mapbox.mapboxsdk.style.sources.GeoJsonOptions()
+                                        .withCluster(true)
+                                        .withClusterRadius(60)
+                                        .withClusterMaxZoom(14)
+                                )
+
+                                style.addSource(source)
+                                geoJsonSourceRef = source
+
+                                // -------------------------
+                                // LAYERS
+                                // -------------------------
+
+                                val pointLayer = CircleLayer("noise-points", "noise-source")
+                                pointLayer.setProperties(
+                                    PropertyFactory.circleRadius(7f),
+                                    PropertyFactory.circleColor(
+                                        step(
+                                            get("avg_db"),
+                                            color(Color.Green.toArgb()),
+                                            stop(50.0, color(Color.Yellow.toArgb())),
+                                            stop(80.0, color(Color.Red.toArgb()))
+                                        )
+                                    )
+                                )
+                                pointLayer.setFilter(has("avg_db"))
+
+                                val clusterLayer = CircleLayer("clusters", "noise-source")
+                                clusterLayer.setProperties(
+                                    PropertyFactory.circleRadius(18f),
+                                    PropertyFactory.circleColor(color(Color.Gray.toArgb()))
+                                )
+                                clusterLayer.setFilter(has("point_count"))
+
+                                val clusterText = SymbolLayer("cluster-text", "noise-source")
+                                clusterText.setProperties(
+                                    PropertyFactory.textField(get("point_count_abbreviated")),
+                                    PropertyFactory.textSize(12f),
+                                    PropertyFactory.textColor(color(Color.White.toArgb()))
+                                )
+                                clusterText.setFilter(has("point_count"))
+
+                                style.addLayer(clusterLayer)
+                                style.addLayer(clusterText)
+                                style.addLayer(pointLayer)
+
+                                // FIRST DATA PUSH
+                                featureCollection?.let {
+                                    source.setGeoJson(it)
+                                }
+                            }
+                        }
                     }
-                    mapView
+                },
+                update = {
+                    val source = geoJsonSourceRef
+                    val fc = featureCollection
+
+                    if (source != null && fc != null) {
+                        Log.d("MAP_DEBUG", "Updating GeoJSON: ${fc.features()?.size}")
+                        source.setGeoJson(fc)
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
