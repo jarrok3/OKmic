@@ -1002,8 +1002,7 @@ fun NoiseMapLayout(
 
     val mapView = remember { MapView(context) }
 
-    var buildings by remember { mutableStateOf<List<BuildingDto>>(emptyList()) }
-    var streets by remember { mutableStateOf<List<StreetDto>>(emptyList()) }
+    // Usunięto: zmienne stanu dla buildings i streets
     var measurementsList by remember { mutableStateOf<List<NoiseMeasurementDto>>(emptyList()) }
 
     var featureCollection by remember { mutableStateOf<FeatureCollection?>(null) }
@@ -1035,16 +1034,15 @@ fun NoiseMapLayout(
     // LOAD DATA
     // -------------------------
     LaunchedEffect(Unit) {
+        // Pobieramy wyłącznie pomiary hałasu
         measurementsList = databaseManager.fetchAllMeasurements()
-        buildings = databaseManager.fetchBuildings()
-        streets = databaseManager.fetchStreets()
     }
 
     // -------------------------
-    // BUILD GEOJSON (OK)
+    // BUILD GEOJSON
     // -------------------------
-    LaunchedEffect(measurementsList, buildings, streets) {
-
+    // Usunięto zależności od buildings i streets
+    LaunchedEffect(measurementsList) {
         val noiseFeatures = measurementsList.mapNotNull { dto ->
             val latLng = dto.toLatLng() ?: return@mapNotNull null
 
@@ -1055,14 +1053,10 @@ fun NoiseMapLayout(
             }
         }
 
-        val buildingFeatures = buildings.mapNotNull { wkbToFeature(it.geom) }
-        val streetFeatures = streets.mapNotNull { wkbToFeature(it.geom) }
+        // Zbiór punktów zawiera tylko Twoje pomiary
+        featureCollection = FeatureCollection.fromFeatures(noiseFeatures)
 
-        val all = noiseFeatures + buildingFeatures + streetFeatures
-
-        featureCollection = FeatureCollection.fromFeatures(all)
-
-        Log.d("GEO_DEBUG", "FINAL FEATURES: ${all.size}")
+        Log.d("GEO_DEBUG", "FINAL NOISE FEATURES: ${noiseFeatures.size}")
     }
 
     // -------------------------
@@ -1092,9 +1086,10 @@ fun NoiseMapLayout(
                                 .zoom(11.0)
                                 .build()
 
+                            // PODMIENIONY STYL MAPY NA BARDZIEJ SZCZEGÓŁOWY
                             map.setStyle(
                                 Style.Builder()
-                                    .fromUri("https://demotiles.maplibre.org/style.json")
+                                    .fromUri("https://api.maptiler.com/maps/dataviz-dark/style.json?key=${BuildConfig.MAPTILER_PUBLIC_KEY}")
                             ) { style ->
 
                                 mapStyleRef = style
@@ -1112,7 +1107,7 @@ fun NoiseMapLayout(
                                 geoJsonSourceRef = source
 
                                 // -------------------------
-                                // LAYERS
+                                // LAYERS (konfiguracja klastrów i punktów)
                                 // -------------------------
 
                                 val pointLayer = CircleLayer("noise-points", "noise-source")
