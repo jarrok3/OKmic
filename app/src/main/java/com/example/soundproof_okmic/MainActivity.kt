@@ -1,10 +1,10 @@
 package com.example.soundproof_okmic
 
 import android.Manifest
-import android.util.Log
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -73,7 +73,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -119,8 +118,8 @@ import com.mapbox.mapboxsdk.maps.Style
 import com.mapbox.mapboxsdk.style.expressions.Expression.color
 import com.mapbox.mapboxsdk.style.expressions.Expression.get
 import com.mapbox.mapboxsdk.style.expressions.Expression.has
-import com.mapbox.mapboxsdk.style.expressions.Expression.not
-import com.mapbox.mapboxsdk.style.expressions.Expression.step
+import com.mapbox.mapboxsdk.style.expressions.Expression.interpolate
+import com.mapbox.mapboxsdk.style.expressions.Expression.linear
 import com.mapbox.mapboxsdk.style.expressions.Expression.stop
 import com.mapbox.mapboxsdk.style.layers.CircleLayer
 import com.mapbox.mapboxsdk.style.layers.PropertyFactory
@@ -132,8 +131,6 @@ import kotlinx.serialization.Serializable
 import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
-import com.mapbox.mapboxsdk.style.layers.LineLayer
-import com.mapbox.mapboxsdk.style.layers.FillLayer
 
 // For unified UI adjustments
 data object InScreenOffset{
@@ -997,6 +994,8 @@ fun NoiseMapLayout(
     databaseManager: DatabaseManager,
     modifier: Modifier = Modifier
 ) {
+    var selectedMeasurement by remember { mutableStateOf<NoiseMeasurementDto?>(null) }
+
     val context = LocalContext.current
     val warsawCenter = LatLng(52.2297, 21.0122)
 
@@ -1043,13 +1042,14 @@ fun NoiseMapLayout(
     // -------------------------
     // Usunięto zależności od buildings i streets
     LaunchedEffect(measurementsList) {
-        val noiseFeatures = measurementsList.mapNotNull { dto ->
-            val latLng = dto.toLatLng() ?: return@mapNotNull null
+        val noiseFeatures = measurementsList.mapIndexedNotNull { index, dto ->
+            val latLng = dto.toLatLng() ?: return@mapIndexedNotNull null
 
             Feature.fromGeometry(
                 Point.fromLngLat(latLng.longitude, latLng.latitude)
             ).apply {
                 addNumberProperty("avg_db", dto.avg_db)
+                addNumberProperty("measurement_index", index)
             }
         }
 
@@ -1068,25 +1068,23 @@ fun NoiseMapLayout(
         modifier = modifier
     ) { innerPadding ->
 
+        // JEDEN WSPÓLNY BOX NA MAPĘ I NAKŁADKĘ UI
         Box(
             Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
 
+            // 1. WIDOK MAPY
             AndroidView(
                 factory = {
-
                     mapView.apply {
-
                         getMapAsync { map ->
-
                             map.cameraPosition = CameraPosition.Builder()
                                 .target(warsawCenter)
                                 .zoom(11.0)
                                 .build()
 
-                            // PODMIENIONY STYL MAPY NA BARDZIEJ SZCZEGÓŁOWY
                             map.setStyle(
                                 Style.Builder()
                                     .fromUri("https://api.maptiler.com/maps/dataviz-dark/style.json?key=${BuildConfig.MAPTILER_PUBLIC_KEY}")
@@ -1106,19 +1104,27 @@ fun NoiseMapLayout(
                                 style.addSource(source)
                                 geoJsonSourceRef = source
 
-                                // -------------------------
-                                // LAYERS (konfiguracja klastrów i punktów)
-                                // -------------------------
-
                                 val pointLayer = CircleLayer("noise-points", "noise-source")
                                 pointLayer.setProperties(
-                                    PropertyFactory.circleRadius(7f),
+                                    PropertyFactory.circleRadius(8f),
                                     PropertyFactory.circleColor(
-                                        step(
+                                        interpolate(
+                                            linear(),
                                             get("avg_db"),
-                                            color(Color.Green.toArgb()),
-                                            stop(50.0, color(Color.Yellow.toArgb())),
-                                            stop(80.0, color(Color.Red.toArgb()))
+                                            stop(-96.0, color(Color(0xFF2E7D32).toArgb())),
+                                            stop(-65.0, color(Color(0xFF4CAF50).toArgb())),
+                                            stop(-45.0, color(Color(0xFFFFEB3B).toArgb())),
+                                            stop(-25.0, color(Color(0xFFFF9800).toArgb())),
+                                            stop(0.0, color(Color(0xFFE53935).toArgb()))
+                                        )
+                                    ),
+                                    PropertyFactory.circleOpacity(
+                                        interpolate(
+                                            linear(),
+                                            get("avg_db"),
+                                            stop(-96.0, 0.3f),
+                                            stop(-45.0, 0.7f),
+                                            stop(0.0, 1.0f)
                                         )
                                     )
                                 )
@@ -1143,7 +1149,24 @@ fun NoiseMapLayout(
                                 style.addLayer(clusterText)
                                 style.addLayer(pointLayer)
 
-                                // FIRST DATA PUSH
+                                map.addOnMapClickListener { latLng ->
+                                    val pixel = map.projection.toScreenLocation(latLng)
+                                    val features = map.queryRenderedFeatures(pixel, "noise-points")
+
+                                    if (features.isNotEmpty()) {
+                                        val clickedFeature = features[0]
+                                        val index = clickedFeature.getNumberProperty("measurement_index")?.toInt()
+
+                                        if (index != null && index in measurementsList.indices) {
+                                            selectedMeasurement = measurementsList[index]
+                                        }
+                                        true
+                                    } else {
+                                        selectedMeasurement = null
+                                        false
+                                    }
+                                }
+
                                 featureCollection?.let {
                                     source.setGeoJson(it)
                                 }
@@ -1162,6 +1185,56 @@ fun NoiseMapLayout(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+
+            // 2. NAKŁADKA UI KARTY W TYM SAMYM BOXIE CO MAPA
+            selectedMeasurement?.let { measurement ->
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter) // Wyświetli się idealnie na dole mapy!
+                        .padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
+                        .fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Szczegóły pomiaru",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            IconButton(onClick = { selectedMeasurement = null }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Delete, // Zmień sobie ikonkę na np. Icons.Rounded.Close jeśli masz zaimportowaną
+                                    contentDescription = "Zamknij"
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Lokalizacja: ${measurement.location}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = "Głośność: ${measurement.avg_db} dBFS",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (measurement.avg_db > -30f) Color.Red else MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Czas: ${measurement.timestamp_ms}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
         }
     }
 }
