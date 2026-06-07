@@ -119,6 +119,8 @@ import com.mapbox.mapboxsdk.maps.Style
 import com.mapbox.mapboxsdk.style.expressions.Expression.color
 import com.mapbox.mapboxsdk.style.expressions.Expression.get
 import com.mapbox.mapboxsdk.style.expressions.Expression.has
+import com.mapbox.mapboxsdk.style.expressions.Expression.interpolate
+import com.mapbox.mapboxsdk.style.expressions.Expression.linear
 import com.mapbox.mapboxsdk.style.expressions.Expression.not
 import com.mapbox.mapboxsdk.style.expressions.Expression.step
 import com.mapbox.mapboxsdk.style.expressions.Expression.stop
@@ -1112,13 +1114,31 @@ fun NoiseMapLayout(
 
                                 val pointLayer = CircleLayer("noise-points", "noise-source")
                                 pointLayer.setProperties(
-                                    PropertyFactory.circleRadius(7f),
+                                    // Ustawiamy stały, wyraźny promień punktu
+                                    PropertyFactory.circleRadius(8f),
+
+                                    // PŁYNNA ZMIANA KOLORU (Interpolacja liniowa)
                                     PropertyFactory.circleColor(
-                                        step(
+                                        interpolate(
+                                            linear(),
                                             get("avg_db"),
-                                            color(Color.Green.toArgb()),
-                                            stop(50.0, color(Color.Yellow.toArgb())),
-                                            stop(80.0, color(Color.Red.toArgb()))
+                                            stop(-96.0, color(Color(0xFF2E7D32).toArgb())), // Głęboka, spokojna zieleń (cisza)
+                                            stop(-65.0, color(Color(0xFF4CAF50).toArgb())), // Jasna zieleń
+                                            stop(-45.0, color(Color(0xFFFFEB3B).toArgb())), // Żółty (umiarkowany hałas)
+                                            stop(-25.0, color(Color(0xFFFF9800).toArgb())), // Intensywny pomarańczowy
+                                            stop(0.0, color(Color(0xFFE53935).toArgb()))    // Jaskrawa, alarmująca czerwień (maksymalny hałas / 0 dBFS)
+                                        )
+                                    ),
+
+                                    // PŁYNNA ZMIANA INTENSYWNOŚCI / WIDOCZNOŚCI
+                                    // Sprawi, że ciche punkty wtopią się w tło, a głośne będą mocno odcięte
+                                    PropertyFactory.circleOpacity(
+                                        interpolate(
+                                            linear(),
+                                            get("avg_db"),
+                                            stop(-96.0, 0.3f), // Przy -96 dBFS kropka jest mocno przezroczysta (33%)
+                                            stop(-45.0, 0.7f), // Średni hałas jest średnio widoczny
+                                            stop(0.0, 1.0f)    // Hałas przy 0 dBFS jest w 100% kryjący i wyraźny
                                         )
                                     )
                                 )
