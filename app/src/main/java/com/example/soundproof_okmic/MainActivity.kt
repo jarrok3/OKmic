@@ -1219,7 +1219,7 @@ fun NoiseMapLayout(
                         }
 
                         Text(
-                            text = "Lokalizacja: ${measurement.location}",
+                            text = "Lokalizacja: ${measurement.toLatLng()}",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
@@ -1228,7 +1228,7 @@ fun NoiseMapLayout(
                             color = if (measurement.avg_db > -30f) Color.Red else MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Czas: ${measurement.timestamp_ms}",
+                            text = "Czas: ${measurement.toReadableDate()}",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.Gray
                         )
