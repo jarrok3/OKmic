@@ -7,7 +7,7 @@ the app contains two main functionalites:
 
 # Mockup
 
-The current layout and design of the app is in-progress, however the general foundation has been presented in the photos below.
+The current layout and design of the app is completed, however in the future the UI updates may lead to a better overall experience. Their mockup is listed below
 
 ![Fig. 1.](figures/1.png)
 
